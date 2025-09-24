@@ -1,0 +1,41 @@
+name: Go Tests
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+
+      - name: Run tests with coverage
+        run: |
+          go test ./... -race -covermode=atomic -coverpkg=./... -coverprofile=coverage.out
+
+      - name: Filter out presentation/data-only files from coverage
+        run: |
+          grep -v "internal/models/types.go" coverage.out \
+          | grep -v "pkg/output/console.go" \
+          | grep -v "pkg/output/json.go" \
+          | grep -v "internal/progress/indicators.go" \
+          > coverage.filtered
+          mv coverage.filtered coverage.out
+
+      - name: Show coverage summary
+        run: go tool cover -func=coverage.out
+
+      - name: Upload coverage artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
