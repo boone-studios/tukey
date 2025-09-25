@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [ main ]
+  push:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+
+      - name: Test with race + coverage
+        run: |
+          go test ./... -race -covermode=atomic -coverpkg=./... -coverprofile=coverage.out
+          go tool cover -func=coverage.out
+
+      - name: Smoke build (linux/amd64)
+        run: |
+          mkdir -p dist
+          GOOS=linux GOARCH=amd64 go build -ldflags "-X main.version=CI -X main.commit=${GITHUB_SHA::7} -X main.date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" -o dist/tukey ./cmd/tukey
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tukey-ci-linux-amd64
+          path: dist/tukey

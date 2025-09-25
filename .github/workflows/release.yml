@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'   # e.g., v1.0.0
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ github.ref_name }}
+      COMMIT:  ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+
+      - name: Build matrix
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          date_utc="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          ldflags="-X main.version=${VERSION} -X main.commit=${COMMIT::7} -X main.date=${date_utc}"
+
+          # Build targets
+          targets=(
+            "linux amd64"
+            "linux arm64"
+            "darwin amd64"
+            "darwin arm64"
+            "windows amd64"
+            "windows arm64"
+          )
+
+          for t in "${targets[@]}"; do
+            read -r goos goarch <<<"$t"
+            ext=""
+            [ "$goos" = "windows" ] && ext=".exe"
+            out="tukey_${VERSION}_${goos}_${goarch}${ext}"
+            echo ">> Building ${out}"
+            GOOS="$goos" GOARCH="$goarch" go build -ldflags "$ldflags" -o "dist/${out}" ./cmd/tukey
+          done
+
+      - name: Package + checksums
+        run: |
+          set -euo pipefail
+          cd dist
+          # tar/zip each binary; you can switch to tar.gz if preferred everywhere
+          for f in tukey_*; do
+            base="${f%.*}"
+            case "$f" in
+              *.exe) zip "${base}.zip" "$f" ;;
+              *)     tar -czf "${base}.tar.gz" "$f" ;;
+            esac
+          done
+          # Generate SHA256SUMS over archives only
+          sha256sum *.tar.gz *.zip > SHA256SUMS
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.VERSION }}
+          name: Tukey ${{ env.VERSION }}
+          draft: false
+          prerelease: ${{ contains(env.VERSION, '-rc') || contains(env.VERSION, '-beta') }}
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/SHA256SUMS
