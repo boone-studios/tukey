@@ -17,6 +17,7 @@ type Scanner struct {
 	rootPath    string
 	excludeDirs map[string]bool
 	fileCount   int
+	extensions  map[string]bool
 	mu          sync.Mutex
 }
 
@@ -41,6 +42,7 @@ func NewScanner(rootPath string) *Scanner {
 	return &Scanner{
 		rootPath:    rootPath,
 		excludeDirs: excludeDirs,
+		extensions:  make(map[string]bool),
 	}
 }
 
@@ -66,7 +68,7 @@ func (s *Scanner) ScanFiles() ([]models.FileInfo, error) {
 
 		// Only process PHP files
 		// todo: add support for other file types
-		if !info.IsDir() && s.isPHPFile(path) {
+		if !info.IsDir() && s.hasAllowedExtension(path) {
 			relativePath, _ := filepath.Rel(s.rootPath, path)
 
 			fileData := models.FileInfo{
@@ -87,16 +89,20 @@ func (s *Scanner) ScanFiles() ([]models.FileInfo, error) {
 	return files, err
 }
 
+// SetExtensions configures which file extensions to include
+func (s *Scanner) SetExtensions(exts []string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.extensions = make(map[string]bool)
+	for _, e := range exts {
+		s.extensions[strings.ToLower(e)] = true
+	}
+}
+
 // shouldExcludeDir checks if a directory should be excluded
 func (s *Scanner) shouldExcludeDir(dirName string) bool {
 	excluded, exists := s.excludeDirs[strings.ToLower(dirName)]
 	return exists && excluded
-}
-
-// isPHPFile checks if a file is a PHP file
-func (s *Scanner) isPHPFile(filename string) bool {
-	ext := strings.ToLower(filepath.Ext(filename))
-	return ext == ".php" || ext == ".phtml" || ext == ".php3" || ext == ".php4" || ext == ".php5"
 }
 
 // GetStats returns scanning statistics
@@ -104,4 +110,13 @@ func (s *Scanner) GetStats() (int, map[string]bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.fileCount, s.excludeDirs
+}
+
+// hasAllowedExtension checks if the extension is expected of the set language
+func (s *Scanner) hasAllowedExtension(filename string) bool {
+	ext := strings.ToLower(filepath.Ext(filename))
+	if len(s.extensions) == 0 {
+		return false
+	}
+	return s.extensions[ext]
 }

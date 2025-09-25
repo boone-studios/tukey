@@ -1,7 +1,7 @@
 // Copyright (c) 2025 Boone Studios
 // SPDX-License-Identifier: MIT
 
-package parser
+package lang
 
 import (
 	"bufio"
@@ -12,11 +12,12 @@ import (
 	"sync"
 
 	"github.com/boone-studios/tukey/internal/models"
+	"github.com/boone-studios/tukey/internal/parser"
 	"github.com/boone-studios/tukey/internal/progress"
 )
 
-// Parser handles parsing of PHP files
-type Parser struct {
+// PHPParser handles parsing of PHP files
+type PHPParser struct {
 	// Regex patterns for different PHP constructs
 	namespacePattern      *regexp.Regexp
 	usePattern            *regexp.Regexp
@@ -31,9 +32,9 @@ type Parser struct {
 	globalFunctionPattern *regexp.Regexp
 }
 
-// New creates a new PHP parser with compiled regex patterns
-func New() *Parser {
-	return &Parser{
+// NewPHPParser creates a new PHP parser with compiled regex patterns
+func NewPHPParser() *PHPParser {
+	return &PHPParser{
 		// Namespace: namespace App\Models;
 		namespacePattern: regexp.MustCompile(`^\s*namespace\s+([A-Za-z_\\][A-Za-z0-9_\\]*)\s*;`),
 
@@ -70,7 +71,7 @@ func New() *Parser {
 }
 
 // ParseFile analyzes a single PHP file and extracts all elements
-func (p *Parser) ParseFile(filePath string) (*models.ParsedFile, error) {
+func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil, err
@@ -221,7 +222,7 @@ func (p *Parser) ParseFile(filePath string) (*models.ParsedFile, error) {
 }
 
 // parseUsage finds references to external code elements
-func (p *Parser) parseUsage(line string, lineNum int, inFunction, inClass string, parsed *models.ParsedFile) {
+func (p *PHPParser) parseUsage(line string, lineNum int, inFunction, inClass string, parsed *models.ParsedFile) {
 	context := inFunction
 	if context == "" {
 		context = inClass
@@ -300,7 +301,7 @@ func (p *Parser) parseUsage(line string, lineNum int, inFunction, inClass string
 }
 
 // isBuiltinFunction checks if a function name is a PHP built-in
-func (p *Parser) isBuiltinFunction(funcName string) bool {
+func (p *PHPParser) isBuiltinFunction(funcName string) bool {
 	builtins := map[string]bool{
 		// Common PHP built-ins that we want to ignore
 		"array": true, "count": true, "isset": true, "empty": true,
@@ -358,49 +359,50 @@ func parseParameters(paramStr string) []string {
 }
 
 // ProcessFiles parses multiple PHP files concurrently
-func (p *Parser) ProcessFiles(files []models.FileInfo) ([]*models.ParsedFile, error) {
-	return p.ProcessFilesWithProgress(files, nil)
-}
-
-// ProcessFilesWithProgress parses multiple PHP files concurrently with progress tracking
-func (p *Parser) ProcessFilesWithProgress(files []models.FileInfo, progressBar *progress.ProgressBar) ([]*models.ParsedFile, error) {
+func (p *PHPParser) ProcessFiles(files []models.FileInfo, progressBar *progress.ProgressBar) ([]*models.ParsedFile, error) {
 	var parsedFiles []*models.ParsedFile
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
-	// Channel to limit concurrent parsing
-	semaphore := make(chan struct{}, 10) // Max 10 concurrent parsers
+	// Limit concurrency
+	semaphore := make(chan struct{}, 10)
 
 	for _, file := range files {
 		wg.Add(1)
 		go func(f models.FileInfo) {
 			defer wg.Done()
-			semaphore <- struct{}{}        // Acquire
-			defer func() { <-semaphore }() // Release
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
 
 			parsed, err := p.ParseFile(f.Path)
+			mu.Lock()
+			defer mu.Unlock()
+
 			if err != nil {
 				fmt.Printf("⚠️  Error parsing %s: %v\n", f.RelativePath, err)
-				if progressBar != nil {
-					progressBar.Update(1)
-				}
-				return
+			} else {
+				parsedFiles = append(parsedFiles, parsed)
 			}
-
-			mu.Lock()
-			parsedFiles = append(parsedFiles, parsed)
-			if progressBar != nil {
-				progressBar.Update(1)
-			}
-			mu.Unlock()
+			progressBar.Update(1) // always tick, even if parse fails
 		}(file)
 	}
 
 	wg.Wait()
-
-	if progressBar != nil {
-		progressBar.Finish()
-	}
+	progressBar.Finish()
 
 	return parsedFiles, nil
+}
+
+// Language returns the language name for this parser
+func (p *PHPParser) Language() string {
+	return "php"
+}
+
+// FileExtensions returns the file extensions supported by this parser
+func (p *PHPParser) FileExtensions() []string {
+	return []string{".php", ".phtml", ".php3", ".php4", ".php5"}
+}
+
+func init() {
+	parser.Register(NewPHPParser())
 }

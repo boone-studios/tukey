@@ -16,6 +16,9 @@ func TestScanFiles_Golden(t *testing.T) {
 	goldenPath := filepath.Join("..", "..", "testdata", "sample_project.golden")
 
 	s := NewScanner(root)
+	// Tell the scanner which extensions to accept
+	s.SetExtensions([]string{".php", ".phtml", ".php3", ".php4", ".php5"})
+
 	files, err := s.ScanFiles()
 	if err != nil {
 		t.Fatalf("ScanFiles failed: %v", err)
@@ -25,14 +28,13 @@ func TestScanFiles_Golden(t *testing.T) {
 	for _, f := range files {
 		got = append(got, filepath.ToSlash(f.RelativePath))
 	}
-	sort.Strings(got) // <--- important
+	sort.Strings(got)
 	gotStr := strings.Join(got, "\n") + "\n"
 
 	if *update {
 		if err := os.WriteFile(goldenPath, []byte(gotStr), 0644); err != nil {
 			t.Fatalf("failed to update golden file: %v", err)
 		}
-		t.Logf("updated golden file: %s", goldenPath)
 		return
 	}
 

@@ -15,9 +15,11 @@ import (
 	"github.com/boone-studios/tukey/internal/progress"
 	"github.com/boone-studios/tukey/internal/scanner"
 	"github.com/boone-studios/tukey/pkg/output"
+
+	_ "github.com/boone-studios/tukey/internal/lang"
 )
 
-const version = "0.1.0"
+const version = "0.2.0"
 
 func main() {
 	config, err := parseArgs()
@@ -42,7 +44,15 @@ func main() {
 
 	// Initialize components
 	fileScanner := scanner.NewScanner(config.RootPath)
-	phpParser := parser.New()
+
+	p, ok := parser.Get(config.Language)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "❌ Unsupported language: %s\n", config.Language)
+		fmt.Fprintf(os.Stderr, "Supported: %v\n", parser.SupportedLanguages())
+		os.Exit(1)
+	}
+
+	fileScanner.SetExtensions(p.FileExtensions())
 
 	// Configure scanner exclusions
 	for _, dir := range config.ExcludeDirs {
@@ -61,15 +71,15 @@ func main() {
 	}
 
 	spinner.Stop()
-	fmt.Printf("✅ Found %d PHP files (%.2f MB total)\n",
+	fmt.Printf("✅ Found %d files (%.2f MB total)\n",
 		len(files), float64(getTotalSize(files))/(1024*1024))
 
-	// Step 2: Parse PHP files
-	fmt.Printf("🔧 Parsing PHP files and extracting elements...\n")
+	// Step 2: Parse files
+	fmt.Printf("🔧 Parsing project files and extracting elements...\n")
 	parseProgress := progress.NewProgressBar(len(files), "Parsing files")
 
 	startTime := time.Now()
-	parsedFiles, err := phpParser.ProcessFilesWithProgress(files, parseProgress)
+	parsedFiles, err := p.ProcessFiles(files, parseProgress)
 	if err != nil {
 		fmt.Printf("❌ Error parsing files: %v\n", err)
 		os.Exit(1)
@@ -131,6 +141,7 @@ type Config struct {
 	ShowHelp    bool
 	ShowVersion bool
 	ExcludeDirs []string
+	Language    string
 }
 
 // parseArgs parses command line arguments
@@ -170,6 +181,12 @@ func parseArgs() (*Config, error) {
 			}
 			config.ExcludeDirs = append(config.ExcludeDirs, args[i+1])
 			i++
+		case "-l", "--language":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("--language requires a language name")
+			}
+			config.Language = strings.ToLower(args[i+1])
+			i++
 		default:
 			if strings.HasPrefix(arg, "-") {
 				return nil, fmt.Errorf("unknown flag: %s", arg)
@@ -189,6 +206,10 @@ func parseArgs() (*Config, error) {
 		config.OutputFile = "tukey-results.json"
 	}
 
+	if config.Language == "" {
+		config.Language = "php"
+	}
+
 	return config, nil
 }
 
@@ -204,6 +225,7 @@ FLAGS:
     -o, --output <file>     Export results to JSON file
     --exclude <dir>         Exclude directory from analysis (can be used multiple times)
     -h, --help              Show this help message
+    -l, --language    	    Specify the programming language to use
     --version               Show version information
 
 EXAMPLES:
