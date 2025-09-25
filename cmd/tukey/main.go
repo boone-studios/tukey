@@ -27,7 +27,7 @@ func main() {
 	}
 
 	if config.ShowVersion {
-		fmt.Printf("tukey v%s\n", version)
+		fmt.Printf("Tukey v%s\n", version)
 		os.Exit(0)
 	}
 
@@ -36,7 +36,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	fmt.Printf("🔍 tukey Code Analyzer v%s\n", version)
+	fmt.Printf("🔍 Tukey Code Analyzer v%s\n", version)
 	fmt.Printf("🎯 Analyzing codebase in: %s\n", config.RootPath)
 	fmt.Println(strings.Repeat("-", 50))
 
@@ -194,10 +194,10 @@ func parseArgs() (*Config, error) {
 
 // showHelp displays usage information
 func showHelp() {
-	fmt.Printf(`tukey v%s
+	fmt.Printf(`Tukey v%s
 
 USAGE:
-    tukey [FLAGS] <directory>
+    Tukey [FLAGS] <directory>
 
 FLAGS:
     -v, --verbose           Show detailed output including function usage report
