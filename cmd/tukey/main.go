@@ -17,7 +17,7 @@ import (
 	"github.com/boone-studios/tukey/pkg/output"
 )
 
-const version = "1.0.0"
+const version = "0.1.0"
 
 func main() {
 	config, err := parseArgs()
