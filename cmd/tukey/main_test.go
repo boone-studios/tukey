@@ -35,7 +35,7 @@ func TestShowHelp_OutputContainsUsageAndFlags(t *testing.T) {
 	if !strings.Contains(out, "FLAGS:") {
 		t.Errorf("help output missing FLAGS section:\n%s", out)
 	}
-	if !strings.Contains(out, "tukey v") {
+	if !strings.Contains(out, "Tukey v") {
 		t.Errorf("help output missing version string:\n%s", out)
 	}
 }
