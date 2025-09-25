@@ -12,8 +12,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Added `registry.go` for pluggable parser registration (`Register`, `Get`, `SupportedLanguages`).
     - Added `progress.go` with generic `ProcessFilesWithProgress` wrapper for progress bars.
     - Integration test ensures at least one parser is always registered.
-- **JavaScript Stub Parser**
-    - Implemented `JSParser` as a minimal parser for `.js`, `.mjs`, `.cjs` files to prove pluggability.
 
 ### Changed
 - **PHP Parser**
