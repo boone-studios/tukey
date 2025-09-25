@@ -153,6 +153,27 @@ include_extensions:
 max_concurrent_parsers: 10
 ```
 
+## How It Compares
+
+| Tool                   | Language Focus                   | Primary Purpose                                | Output Style                 | Complexity/Dependency Metrics   | Multi-language     | CI/CD Friendly      | Footprint                     |
+| ---------------------- | -------------------------------- | ---------------------------------------------- | ---------------------------- | --------------------------------|--------------------| ------------------- | ----------------------------- |
+| **Tukey**              | PHP first (pluggable for others) | **Maps dependencies, complexity, and orphans** | Console summary, JSON export | ✅ Yes (graph, hotspots, orphans) | 🌍 Designed for it | ✅ Simple JSON + CLI | ⚡ Lightweight (single binary) |
+| PHPStan                | PHP                              | Type safety, strict type checking              | CLI, IDE integration         | ❌ No                            | ❌ No               | ✅ Yes               | ⚖️ Medium (lots of rules)     |
+| Psalm                  | PHP                              | Type checking + code correctness               | CLI, IDE integration         | ❌ No                            | ❌ No               | ✅ Yes               | ⚖️ Medium                     |
+| PDepend                | PHP                              | Code metrics, class dependencies               | XML, charts, reports         | ✅ Yes (metrics & graphs)        | ❌ No               | ⚠️ Limited          | 🐘 Heavier (XML reports)      |
+| phpmetrics             | PHP                              | High-level project health reports              | HTML dashboards              | ✅ Yes (wrapped from PDepend)    | ❌ No               | ⚠️ Limited          | 🐘 Heavier (GUI focus)        |
+| SonarQube              | Many (20+)                       | Enterprise-grade code quality + coverage       | Web dashboards, DB backend   | ✅ Yes (lots, but buried)        | ✅ Yes              | ✅ Deep CI/CD        | 🏢 Heavy (server required)    |
+| SourceTrail (archived) | C++, Java, Python                | Interactive code exploration (graph viewer)    | GUI (desktop)                | ✅ Yes (visual graph)            | ❌ Limited          | ❌ No                | 💻 Desktop app only           |
+
+---
+
+### Key Differentiators
+
+* **Tukey is not a linter**: it doesn’t enforce style or types. Instead, it **draws the map** of your system.
+* **Output is lightweight**: JSON + console means you can plug it into CI pipelines or explore locally without dashboards.
+* **Language-agnostic design**: while starting with PHP, the parser interface makes adding new languages straightforward.
+* **Zero infrastructure**: unlike SonarQube, Tukey is just a single binary — no servers, no databases.
+
 ## Contributing
 
 1. Fork the repository
