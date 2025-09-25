@@ -4,7 +4,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - Unreleased
+
+### Added
+- **Parser Registry**
+    - Introduced `LanguageParser` interface (`ProcessFiles`, `Language`, `FileExtensions`).
+    - Added `registry.go` for pluggable parser registration (`Register`, `Get`, `SupportedLanguages`).
+    - Added `progress.go` with generic `ProcessFilesWithProgress` wrapper for progress bars.
+    - Integration test ensures at least one parser is always registered.
+
+### Changed
+- **PHP Parser**
+    - Renamed `Parser` → `PHPParser`.
+    - Now implements `LanguageParser` and self-registers via `init()`.
+- **Scanner**
+    - Refactored to accept parser-defined file extensions via `SetExtensions`.
+    - Golden test updated to set extensions dynamically from the parser.
+- **CLI**
+    - Added `--lang` flag to choose parser (default: `php`).
+    - Main now looks up parsers via the registry instead of hard-wired PHP.
+
+### Fixed
+- **Tests**
+    - Updated `php_test.go` to use `NewPHPParser()`.
+    - Fixed golden test mismatch by applying parser extensions.
+    - Added unit tests for registry (`Register`, `Get`, `SupportedLanguages`, duplicate panic).
+    - Added smoke test for progress wrapper.
+    - Added integration test to ensure parsers are always registered.
+- **CLI**
+    - Fixed the project name being the incorrect case.
+
 ## [0.1.0] - 2025-09-24
+
 ### Added
 - **File Scanner**
     - Recursive discovery of PHP files with extension list (`.php`, `.phtml`, `.php3`, `.php4`, `.php5`).

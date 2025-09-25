@@ -1,4 +1,4 @@
-package parser
+package lang
 
 import (
 	"os"
@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/boone-studios/tukey/internal/models"
+	"github.com/boone-studios/tukey/internal/progress"
 )
 
 func writePHP(t *testing.T, dir, name, code string) string {
@@ -32,7 +33,7 @@ abstract class User {
 `
 	path := writePHP(t, tmp, "User.php", code)
 
-	p := New()
+	p := NewPHPParser()
 	parsed, err := p.ParseFile(path)
 	if err != nil {
 		t.Fatalf("ParseFile error: %v", err)
@@ -83,7 +84,7 @@ format_phone("123");
 `
 	path := writePHP(t, tmp, "helpers.php", code)
 
-	p := New()
+	p := NewPHPParser()
 	parsed, err := p.ParseFile(path)
 	if err != nil {
 		t.Fatalf("ParseFile error: %v", err)
@@ -126,8 +127,9 @@ func TestProcessFilesConcurrently(t *testing.T) {
 		{Path: filepath.Join(tmp, "Two.php"), RelativePath: "Two.php"},
 	}
 
-	p := New()
-	parsed, err := p.ProcessFiles(files)
+	p := NewPHPParser()
+	pb := progress.NewProgressBar(len(files), "Testing parser")
+	parsed, err := p.ProcessFiles(files, pb)
 	if err != nil {
 		t.Fatalf("ProcessFiles error: %v", err)
 	}
