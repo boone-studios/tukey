@@ -67,7 +67,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.VERSION }}
-          name: Tukey ${{ env.VERSION }}
+          name: ${{ env.VERSION }}
           draft: false
           prerelease: ${{ contains(env.VERSION, '-rc') || contains(env.VERSION, '-beta') }}
           files: |
