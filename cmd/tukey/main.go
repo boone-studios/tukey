@@ -20,7 +20,7 @@ import (
 	_ "github.com/boone-studios/tukey/internal/lang"
 )
 
-const version = "0.2.0"
+const version = "0.3.0"
 
 func main() {
 	argv, err := parseArgs()
@@ -236,6 +236,17 @@ FLAGS:
     -h, --help              Show this help message
     -l, --language    	    Specify the programming language to use
     --version               Show version information
+
+CONFIGURATION:
+    Tukey will automatically load settings from a config file in the project root
+    if one exists. Supported file names are:
+
+        .tukey.yml
+        .tukey.yaml
+        .tukey.json
+
+    These files let you define defaults such as language, excludeDirs, verbose,
+    and outputFile so you don’t need to pass flags every run.
 
 EXAMPLES:
     tukey ./my-project

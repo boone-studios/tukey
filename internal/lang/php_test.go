@@ -18,7 +18,7 @@ func writePHP(t *testing.T, dir, name, code string) string {
 	return path
 }
 
-func TestParseFile_ClassAndMethod(t *testing.T) {
+func TestPHPParser_ClassAndMethod(t *testing.T) {
 	tmp := t.TempDir()
 	code := `<?php
 namespace App\Models;
@@ -74,7 +74,7 @@ abstract class User {
 	}
 }
 
-func TestParseFile_FunctionAndUsage(t *testing.T) {
+func TestPHPParser_FunctionAndUsage(t *testing.T) {
 	tmp := t.TempDir()
 	code := `<?php
 function format_phone($num) { return $num; }
@@ -117,7 +117,7 @@ format_phone("123");
 	}
 }
 
-func TestProcessFilesConcurrently(t *testing.T) {
+func TestPHPParser_ProcessFilesConcurrently(t *testing.T) {
 	tmp := t.TempDir()
 	writePHP(t, tmp, "One.php", "<?php class One {}")
 	writePHP(t, tmp, "Two.php", "<?php class Two {}")
