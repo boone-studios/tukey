@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/boone-studios/tukey/internal/config"
 )
 
 func captureOutput(f func()) string {
@@ -92,5 +94,64 @@ func TestParseArgs_NoArgsShowsHelp(t *testing.T) {
 	}
 	if !cfg.ShowHelp {
 		t.Errorf("expected ShowHelp to be true when no args")
+	}
+}
+
+func TestMergeConfigs_FileProvidesDefaults(t *testing.T) {
+	argv := &Config{
+		RootPath: "myproj",
+		// nothing else set
+	}
+	fileCfg := &config.FileConfig{
+		Language:    "php",
+		ExcludeDirs: []string{"vendor", "tests"},
+		OutputFile:  "report.json",
+		Verbose:     true,
+	}
+
+	merged := mergeConfigs(argv, fileCfg)
+
+	if merged.Language != "php" {
+		t.Errorf("expected language php, got %s", merged.Language)
+	}
+	if merged.OutputFile != "report.json" {
+		t.Errorf("expected report.json, got %s", merged.OutputFile)
+	}
+	if !merged.Verbose {
+		t.Errorf("expected verbose = true")
+	}
+	if len(merged.ExcludeDirs) != 2 {
+		t.Errorf("expected 2 excludeDirs, got %d", len(merged.ExcludeDirs))
+	}
+}
+
+func TestMergeConfigs_CLIOverridesFile(t *testing.T) {
+	argv := &Config{
+		RootPath:    "myproj",
+		Language:    "go",
+		OutputFile:  "cli.json",
+		Verbose:     true,
+		ExcludeDirs: []string{"cli-only"},
+	}
+	fileCfg := &config.FileConfig{
+		Language:    "php",
+		ExcludeDirs: []string{"vendor"},
+		OutputFile:  "file.json",
+		Verbose:     false,
+	}
+
+	merged := mergeConfigs(argv, fileCfg)
+
+	if merged.Language != "go" { // CLI wins
+		t.Errorf("expected go, got %s", merged.Language)
+	}
+	if merged.OutputFile != "cli.json" {
+		t.Errorf("expected cli.json, got %s", merged.OutputFile)
+	}
+	if !merged.Verbose {
+		t.Errorf("expected verbose = true from CLI")
+	}
+	if len(merged.ExcludeDirs) != 2 {
+		t.Errorf("expected merged excludeDirs length 2, got %d", len(merged.ExcludeDirs))
 	}
 }
