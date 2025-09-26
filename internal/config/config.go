@@ -17,7 +17,11 @@ type FileConfig struct {
 }
 
 func LoadConfig(projectRoot string) (*FileConfig, error) {
-	candidates := []string{".tukey.yaml", ".tukey.json"}
+	candidates := []string{
+		".tukey.yml",
+		".tukey.yaml",
+		".tukey.json",
+	}
 
 	for _, name := range candidates {
 		path := filepath.Join(projectRoot, name)
@@ -26,7 +30,7 @@ func LoadConfig(projectRoot string) (*FileConfig, error) {
 		}
 	}
 
-	// no config file found
+	// no config file found, return empty
 	return &FileConfig{}, nil
 }
 
