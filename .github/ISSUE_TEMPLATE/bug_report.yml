@@ -1,0 +1,92 @@
+name: "🐛 Bug Report"
+description: Report a reproducible problem
+labels: ["bug"]
+title: "[bug] <short summary>"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Tukey! Fill the sections below as clearly as possible.
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Quick checks
+      options:
+        - label: I'm using the latest release or main branch.
+          required: true
+        - label: I searched existing issues and didn't find a match.
+          required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe what happened in one or two sentences?
+      placeholder: Parser crashes on nested generics in PHP 8.2
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to Reproduce
+      description: Minimal, deterministic steps and (if possible) a tiny code sample/file.
+      placeholder: |
+        1. Run `tukey analyze sample.foo`
+        2. Observe panic at ...
+        Sample:
+        ```foo
+        // minimal failing example
+        ```
+      render: markdown
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected vs. Actual
+      placeholder: |
+        Expected: Parse completes and detects 3 symbols
+        Actual: Parser panics with "index out of range"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version / Commit
+      description: Release tag (e.g., v0.3.0) or commit SHA.
+      placeholder: v0.3.0
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS & Arch
+      placeholder: macOS 14.5 (arm64)
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Runtime / Toolchain
+      description: Go version, PHP/Node versions if relevant, etc.
+      placeholder: go1.22.3
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - blocks CI / crashes
+        - wrong output
+        - degraded performance
+        - minor annoyance
+      default: 0
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Stacktrace
+      description: Paste with backticks or attach as a file.
+      render: text
+  - type: textarea
+    id: notes
+    attributes:
+      label: Extra context
+      description: Links to related issues/PRs, screenshots, etc.
