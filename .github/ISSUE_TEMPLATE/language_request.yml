@@ -1,0 +1,108 @@
+name: "🧩 Language Request"
+description: Request support for a new language or dialect
+labels: ["language-request", "enhancement"]
+title: "[lang] <Language name> support"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Help us scope support for a new language. Keep it simple; links beat long descriptions.
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Quick checks
+      options:
+        - label: I searched existing Language Requests and didn't find this one.
+          required: true
+        - label: I can provide small, real-world sample files (1-3 files).
+          required: true
+  - type: input
+    id: language_name
+    attributes:
+      label: Language / Dialect
+      placeholder: e.g., Kotlin, PHP 8.4, Hack, FooLang DSL
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Target Versions
+      description: Specific versions or ranges you need supported.
+      placeholder: e.g., Kotlin 2.x, PHP 8.3-8.4
+  - type: textarea
+    id: use_cases
+    attributes:
+      label: Primary Use Cases
+      description: What you want Tukey to analyze (dependencies, dead code, complexity, etc.).
+      placeholder: |
+        • Identify unused services and DTOs
+        • Measure cross-module coupling
+        • Detect dead code in plugins
+  - type: textarea
+    id: file_extensions
+    attributes:
+      label: File Extensions & Typical Layout
+      description: Common extensions and any standard project structure.
+      placeholder: |
+        Extensions: .kt, .kts
+        Layout: Gradle multi-module, src/main/kotlin, src/test/kotlin
+  - type: textarea
+    id: grammar_refs
+    attributes:
+      label: Grammar / Spec Links (recommended)
+      description: Official grammar, ANTLR grammars, Tree-sitter grammars, or language specs.
+      placeholder: |
+        • Spec: https://...
+        • Tree-sitter: https://...
+        • ANTLR: https://...
+  - type: dropdown
+    id: fork_available
+    attributes:
+      label: Do you already have a parser implementation or a fork?
+      options:
+        - "No"
+        - "Yes, I have a public fork"
+        - "Yes, I opened a PR"
+      default: 0
+    validations:
+      required: true
+  - type: input
+    id: fork_link
+    attributes:
+      label: Fork or PR Link (if applicable)
+      placeholder: https://github.com/<you>/<repo>/tree/<branch> or PR URL
+  - type: textarea
+    id: parser_details
+    attributes:
+      label: Parser Details (optional but helpful)
+      description: Parser library used (Tree-sitter/ANTLR/hand-rolled), limitations, and known tricky constructs.
+      placeholder: |
+        Using Tree-sitter. Tricky bits: multiline string interpolation; nested generics with variance.
+  - type: textarea
+    id: sample_repo
+    attributes:
+      label: Minimal Sample Repo (recommended)
+      description: A tiny repo (or attached archive) that demonstrates typical code for testing.
+      placeholder: https://github.com/<you>/<sample-repo>
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority for you / org
+      options:
+        - exploratory / nice-to-have
+        - important this quarter
+        - blocking work / adoption
+      default: 0
+  - type: textarea
+    id: ecosystem_impact
+    attributes:
+      label: Ecosystem Impact (optional)
+      description: Popular frameworks/tools that matter for this language.
+      placeholder: |
+        • Gradle, Ktor, Spring for Kotlin
+        • Composer, Symfony, Laravel for PHP
+  - type: textarea
+    id: notes
+    attributes:
+      label: Extra context
+      description: Anything else that helps us scope the effort.
