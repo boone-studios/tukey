@@ -301,7 +301,7 @@ func (dt *DependencyTracker) calculateComplexityScore(element *models.CodeElemen
 	score := 1 // Base score
 
 	switch element.Type {
-	case "class":
+	case "class", "interface", "trait", "enum":
 		score = 5
 		if element.IsAbstract {
 			score += 2

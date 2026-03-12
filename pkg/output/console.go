@@ -5,6 +5,7 @@ package output
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/boone-studios/tukey/internal/models"
@@ -167,10 +168,127 @@ func (cf *ConsoleFormatter) PrintFunctionUsageReport(result *models.AnalysisResu
 	fmt.Printf("\n📋 FUNCTION USAGE REPORT\n")
 	fmt.Println(strings.Repeat("=", 70))
 
-	// We will need to get this data from the result
-	// For now, let's create a placeholder
-	fmt.Printf("   Function usage report not yet implemented in output package.\n")
-	fmt.Printf("   This functionality will be moved here from the analyzer.\n")
+	// Collect function definitions from the dependency graph
+	functionDefinitions := make(map[string]*models.DependencyNode)
+	for _, node := range result.Graph.Nodes {
+		if node.Type == "function" {
+			functionDefinitions[node.Name] = node
+		}
+	}
+
+	// Collect all function call sites from parsed files
+	type functionCallSite struct {
+		FilePath string
+		Line     int
+		Context  string
+	}
+
+	functionCalls := make(map[string][]functionCallSite)
+
+	for _, file := range result.ParsedFiles {
+		for _, usage := range file.Usage {
+			if usage.Type != "function_call" {
+				continue
+			}
+
+			call := functionCallSite{
+				FilePath: file.Path,
+				Line:     usage.Line,
+				Context:  usage.Context,
+			}
+			functionCalls[usage.Name] = append(functionCalls[usage.Name], call)
+		}
+	}
+
+	if len(functionCalls) == 0 {
+		fmt.Printf("   No custom function calls detected.\n")
+		fmt.Printf("   (Built-in PHP and common Laravel functions are filtered out)\n")
+		fmt.Println(strings.Repeat("=", 70))
+		return
+	}
+
+	// Build summaries for sorting and display
+	type functionSummary struct {
+		Name       string
+		Definition *models.DependencyNode
+		Calls      []functionCallSite
+		TotalCalls int
+	}
+
+	var summaries []functionSummary
+	for funcName, calls := range functionCalls {
+		summaries = append(summaries, functionSummary{
+			Name:       funcName,
+			Definition: functionDefinitions[funcName],
+			Calls:      calls,
+			TotalCalls: len(calls),
+		})
+	}
+
+	// Sort by total calls descending
+	sort.Slice(summaries, func(i, j int) bool {
+		return summaries[i].TotalCalls > summaries[j].TotalCalls
+	})
+
+	for _, summary := range summaries {
+		if summary.Definition != nil {
+			relativePath := strings.TrimPrefix(summary.Definition.File, "/")
+			if strings.HasPrefix(relativePath, "/") {
+				relativePath = relativePath[1:]
+			}
+
+			fmt.Printf("\n📁 %s\n", relativePath)
+			fmt.Printf("  📋 function %s() (line %d) - %d calls\n",
+				summary.Name, summary.Definition.Line, summary.TotalCalls)
+		} else {
+			fmt.Printf("\n🔧 function %s() - %d calls (external/helper)\n",
+				summary.Name, summary.TotalCalls)
+		}
+
+		fmt.Printf("  🔗 Called from %d locations:\n", len(summary.Calls))
+
+		// Group calls by file for nicer output
+		callsByFile := make(map[string][]functionCallSite)
+		for _, call := range summary.Calls {
+			callsByFile[call.FilePath] = append(callsByFile[call.FilePath], call)
+		}
+
+		// For deterministic output, sort files by name
+		var filePaths []string
+		for path := range callsByFile {
+			filePaths = append(filePaths, path)
+		}
+		sort.Strings(filePaths)
+
+		for _, filePath := range filePaths {
+			calls := callsByFile[filePath]
+
+			relativePath := strings.TrimPrefix(filePath, "/")
+			if strings.HasPrefix(relativePath, "/") {
+				relativePath = relativePath[1:]
+			}
+
+			if relativePath == "" {
+				fmt.Printf("    📂 Unknown context:\n")
+			} else {
+				fmt.Printf("    📂 %s:\n", relativePath)
+			}
+
+			// Sort calls by line number within each file
+			sort.Slice(calls, func(i, j int) bool {
+				return calls[i].Line < calls[j].Line
+			})
+
+			for _, call := range calls {
+				contextStr := ""
+				if call.Context != "" {
+					contextStr = fmt.Sprintf(" in %s()", call.Context)
+				}
+
+				fmt.Printf("      → line %d%s\n", call.Line, contextStr)
+			}
+		}
+	}
 
 	fmt.Println(strings.Repeat("=", 70))
 }

@@ -137,3 +137,73 @@ func TestPHPParser_ProcessFilesConcurrently(t *testing.T) {
 		t.Errorf("expected 2 parsed files, got %d", len(parsed))
 	}
 }
+
+func TestPHPParser_EnumsAndFinalClasses(t *testing.T) {
+	tmp := t.TempDir()
+	code := `<?php
+final class FinalUser extends BaseUser implements JsonSerializable, Stringable {}
+
+trait Loggable {}
+
+class UsesTrait {
+    use Loggable;
+}
+
+enum Status: string implements BackedEnum {
+    case Draft = 'draft';
+}
+`
+	path := writePHP(t, tmp, "EnumAndFinal.php", code)
+
+	p := NewPHPParser()
+	parsed, err := p.ParseFile(path)
+	if err != nil {
+		t.Fatalf("ParseFile error: %v", err)
+	}
+
+	var foundFinalClass, foundEnum, foundTrait, foundUsesTrait bool
+	var extendsUsage, implementsUsage, enumImplements, traitUseEdge bool
+
+	for _, el := range parsed.Elements {
+		switch el.Type {
+		case "class":
+			if el.Name == "FinalUser" {
+				foundFinalClass = true
+				if el.IsAbstract {
+					t.Errorf("expected final class not to be abstract")
+				}
+			}
+			if el.Name == "UsesTrait" {
+				foundUsesTrait = true
+			}
+		case "enum":
+			if el.Name == "Status" {
+				foundEnum = true
+			}
+		case "trait":
+			if el.Name == "Loggable" {
+				foundTrait = true
+			}
+		}
+	}
+
+	for _, u := range parsed.Usage {
+		if u.Context == "FinalUser" && u.Type == "extends" && u.Name == "BaseUser" {
+			extendsUsage = true
+		}
+		if u.Context == "FinalUser" && u.Type == "implements" && (u.Name == "JsonSerializable" || u.Name == "Stringable") {
+			implementsUsage = true
+		}
+		if u.Context == "Status" && u.Type == "implements" && u.Name == "BackedEnum" {
+			enumImplements = true
+		}
+		if u.Context == "UsesTrait" && u.Type == "uses_trait" && u.Name == "Loggable" {
+			traitUseEdge = true
+		}
+	}
+
+	if !foundFinalClass || !foundEnum || !foundTrait || !foundUsesTrait || !extendsUsage || !implementsUsage || !enumImplements || !traitUseEdge {
+		t.Errorf("expected final class, enum, trait and use with relationships, got class=%v enum=%v trait=%v usesTrait=%v extends=%v implements=%v enumImplements=%v traitUse=%v",
+			foundFinalClass, foundEnum, foundTrait, foundUsesTrait, extendsUsage, implementsUsage, enumImplements, traitUseEdge)
+	}
+}

@@ -8,7 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **CLI**
-    - Use `.tukey.yml` or `.tukey.json` for per-project configurtion. 
+    - Use `.tukey.yml` or `.tukey.json` for per-project configuration.
+- **Docs**
+    - Added `AGENTS.md`, an agent-facing architecture guide covering project layout, the analysis pipeline, feature status vs. `README.md`, and extension guidelines for new languages and outputs.
+- **Output**
+    - Implemented a detailed Function Usage Report in `ConsoleFormatter` for verbose mode, matching the examples in `README.md` and driven by `AnalysisResult` (no more printing from deep analyzer internals).
+
+### Changed
+- **PHP Analyzer**
+    - Promoted interfaces, traits, and enums to first-class `CodeElement` nodes so they appear in the dependency graph and complexity reports.
+    - Improved class parsing to correctly handle leading `abstract` and `final` modifiers without misidentifying them as class names.
+    - Added explicit usage relationships for inheritance and implementation: `"extends"` edges for `class`/`interface` parents and `"implements"` edges for classes and enums.
+    - Detected trait composition inside classes and similar constructs via `"uses_trait"` usage entries, so `use Loggable;` and similar patterns appear as dependencies in the graph.
+- **Analyzer**
+    - Updated complexity scoring so `interface`, `trait`, and `enum` types are treated consistently with classes when ranking complex elements.
 
 ## [0.2.0] - 2025-09-25
 
