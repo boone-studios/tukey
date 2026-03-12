@@ -54,6 +54,33 @@ tukey -v --output analysis.json /path/to/your/php/project
 tukey --exclude vendor --exclude tests /path/to/your/php/project
 ```
 
+## Configuration
+
+You can configure Tukey by creating a `.tukey.yml` file in the root of your project.
+
+```yaml
+language: php
+outputFile: analysis.json
+verbose: true
+excludeDirs:
+  - bootstrap
+  - public
+```
+
+If you prefer JSON, you can use a `.tukey.json` file instead.
+
+```json
+{
+  "language": "php",
+  "outputFile": "analysis.json",
+  "verbose": true,
+  "excludeDirs": [
+    "bootstrap",
+    "public"
+  ]
+}
+```
+
 ## Use Cases
 
 ### Legacy Code Understanding
@@ -125,34 +152,6 @@ Identify refactoring opportunities:
 }
 ```
 
-## Architecture
-
-The tool follows clean architecture principles:
-
-- **`cmd/`** - Application entry points
-- **`internal/`** - Private application code
-- **`pkg/`** - Public library code
-- **`testdata/`** - Test fixtures
-- **`docs/`** - Documentation
-
-## Configuration
-
-Create a `configs/analyzer.yaml` file:
-
-```yaml
-exclude_dirs:
-  - vendor
-  - node_modules
-  - storage/cache
-  - .git
-
-include_extensions:
-  - .php
-  - .phtml
-
-max_concurrent_parsers: 10
-```
-
 ## How It Compares
 
 | Tool                   | Language Focus                   | Primary Purpose                                | Output Style                 | Complexity/Dependency Metrics   | Multi-language     | CI/CD Friendly      | Footprint                     |
@@ -173,6 +172,16 @@ max_concurrent_parsers: 10
 * **Output is lightweight**: JSON + console means you can plug it into CI pipelines or explore locally without dashboards.
 * **Language-agnostic design**: while starting with PHP, the parser interface makes adding new languages straightforward.
 * **Zero infrastructure**: unlike SonarQube, Tukey is just a single binary — no servers, no databases.
+
+## Architecture
+
+The tool follows clean architecture principles:
+
+- **`cmd/`** - Application entry points
+- **`internal/`** - Private application code
+- **`pkg/`** - Public library code
+- **`testdata/`** - Test fixtures
+- **`docs/`** - Documentation
 
 ## Contributing
 

@@ -22,6 +22,10 @@ type PHPParser struct {
 	namespacePattern      *regexp.Regexp
 	usePattern            *regexp.Regexp
 	classPattern          *regexp.Regexp
+	interfacePattern      *regexp.Regexp
+	traitPattern          *regexp.Regexp
+	enumPattern           *regexp.Regexp
+	traitUsePattern       *regexp.Regexp
 	functionPattern       *regexp.Regexp
 	methodPattern         *regexp.Regexp
 	propertyPattern       *regexp.Regexp
@@ -42,7 +46,17 @@ func NewPHPParser() *PHPParser {
 		usePattern: regexp.MustCompile(`^\s*use\s+([A-Za-z_\\][A-Za-z0-9_\\]*)\s*(?:as\s+([A-Za-z_][A-Za-z0-9_]*))?\s*;`),
 
 		// Class: class User extends Model implements UserInterface
-		classPattern: regexp.MustCompile(`^\s*(abstract\s+)?class\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:extends\s+([A-Za-z_][A-Za-z0-9_]*))?\s*(?:implements\s+([A-Za-z0-9_,\s]+))?\s*\{?`),
+		// Supports optional leading "abstract" or "final" without treating them as class names
+		classPattern: regexp.MustCompile(`^\s*(?:(abstract|final)\s+)?class\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:extends\s+([A-Za-z_\\][A-Za-z0-9_\\]*))?\s*(?:implements\s+([A-Za-z0-9_\\,\s]+))?\s*\{?`),
+
+		// Interface: interface UserRepository extends BaseRepository
+		interfacePattern: regexp.MustCompile(`^\s*interface\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:extends\s+([A-Za-z0-9_,\s]+))?\s*\{?`),
+
+		// Trait: trait Loggable
+		traitPattern: regexp.MustCompile(`^\s*trait\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{?`),
+
+		// Enum: enum Status: string implements BackedEnum
+		enumPattern: regexp.MustCompile(`^\s*enum\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?::\s*([A-Za-z_\\][A-Za-z0-9_\\]*))?\s*(?:implements\s+([A-Za-z0-9_\\,\s]+))?\s*\{?`),
 
 		// Function: function getUserById($id): User
 		functionPattern: regexp.MustCompile(`^\s*function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*(?::\s*([A-Za-z_\\][A-Za-z0-9_\\]*))?\s*\{?`),
@@ -64,6 +78,9 @@ func NewPHPParser() *PHPParser {
 
 		// New instances: new User(), new \App\Models\User()
 		newInstancePattern: regexp.MustCompile(`new\s+([A-Za-z_\\][A-Za-z0-9_\\]*)`),
+
+		// Trait use inside class: use Loggable, Auditable;
+		traitUsePattern: regexp.MustCompile(`^\s*use\s+([A-Za-z_\\][A-Za-z0-9_\\]*(?:\s*,\s*[A-Za-z_\\][A-Za-z0-9_\\]*)*)\s*;`),
 
 		// Global function calls: format_phone($phone), validate_email($email)
 		globalFunctionPattern: regexp.MustCompile(`\b([a-zA-Z_][a-zA-Z0-9_]*)\s*\(`),
@@ -110,9 +127,11 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 			parsed.Namespace = matches[1]
 		}
 
-		// Parse use statements
-		if matches := p.usePattern.FindStringSubmatch(line); matches != nil {
-			parsed.Uses = append(parsed.Uses, matches[1])
+		// Parse use statements (only at top-level, outside classes/interfaces/traits/enums)
+		if inClass == "" {
+			if matches := p.usePattern.FindStringSubmatch(line); matches != nil {
+				parsed.Uses = append(parsed.Uses, matches[1])
+			}
 		}
 
 		// Parse class declaration
@@ -127,9 +146,126 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 				IsAbstract: strings.Contains(matches[1], "abstract"),
 			}
 			parsed.Elements = append(parsed.Elements, element)
+
+			// Model inheritance and implemented interfaces as usage
+			if matches[3] != "" {
+				parent := strings.TrimSpace(matches[3])
+				if parent != "" {
+					parsed.Usage = append(parsed.Usage, models.UsageElement{
+						Type:    "extends",
+						Name:    parent,
+						Context: inClass,
+						Line:    lineNum,
+					})
+				}
+			}
+			if matches[4] != "" {
+				for _, iface := range strings.Split(matches[4], ",") {
+					iface = strings.TrimSpace(iface)
+					if iface == "" {
+						continue
+					}
+					parsed.Usage = append(parsed.Usage, models.UsageElement{
+						Type:    "implements",
+						Name:    iface,
+						Context: inClass,
+						Line:    lineNum,
+					})
+				}
+			}
 		}
 
-		// Parse method declaration (inside class)
+		// Parse interface declaration
+		if matches := p.interfacePattern.FindStringSubmatch(line); matches != nil {
+			inClass = matches[1]
+			element := models.CodeElement{
+				Type:      "interface",
+				Name:      matches[1],
+				Namespace: parsed.Namespace,
+				Line:      lineNum,
+				File:      filePath,
+			}
+			parsed.Elements = append(parsed.Elements, element)
+
+			// Extended interfaces as usage
+			if len(matches) > 2 && matches[2] != "" {
+				for _, parentIface := range strings.Split(matches[2], ",") {
+					parentIface = strings.TrimSpace(parentIface)
+					if parentIface == "" {
+						continue
+					}
+					parsed.Usage = append(parsed.Usage, models.UsageElement{
+						Type:    "extends",
+						Name:    parentIface,
+						Context: inClass,
+						Line:    lineNum,
+					})
+				}
+			}
+		}
+
+		// Parse trait declaration
+		if matches := p.traitPattern.FindStringSubmatch(line); matches != nil {
+			inClass = matches[1]
+			element := models.CodeElement{
+				Type:      "trait",
+				Name:      matches[1],
+				Namespace: parsed.Namespace,
+				Line:      lineNum,
+				File:      filePath,
+			}
+			parsed.Elements = append(parsed.Elements, element)
+		}
+
+		// Parse enum declaration
+		if matches := p.enumPattern.FindStringSubmatch(line); matches != nil {
+			inClass = matches[1]
+			element := models.CodeElement{
+				Type:      "enum",
+				Name:      matches[1],
+				Namespace: parsed.Namespace,
+				Line:      lineNum,
+				File:      filePath,
+			}
+			parsed.Elements = append(parsed.Elements, element)
+
+			// Enum implements interfaces
+			if len(matches) > 3 && matches[3] != "" {
+				for _, iface := range strings.Split(matches[3], ",") {
+					iface = strings.TrimSpace(iface)
+					if iface == "" {
+						continue
+					}
+					parsed.Usage = append(parsed.Usage, models.UsageElement{
+						Type:    "implements",
+						Name:    iface,
+						Context: inClass,
+						Line:    lineNum,
+					})
+				}
+			}
+		}
+
+		// Parse trait uses inside class/enum/interface/trait body
+		if inClass != "" {
+			if matches := p.traitUsePattern.FindStringSubmatch(line); matches != nil {
+				traits := strings.Split(matches[1], ",")
+				for _, tName := range traits {
+					tName = strings.TrimSpace(tName)
+					if tName == "" {
+						continue
+					}
+					parsed.Usage = append(parsed.Usage, models.UsageElement{
+						Type:    "uses_trait",
+						Name:    tName,
+						Context: inClass,
+						Line:    lineNum,
+					})
+				}
+			}
+		}
+
+		// Parse method declaration (inside class/enum/interface/trait)
 		if inClass != "" {
 			if matches := p.methodPattern.FindStringSubmatch(line); matches != nil {
 				visibility := "public" // Default visibility

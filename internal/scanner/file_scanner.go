@@ -35,8 +35,6 @@ func NewScanner(rootPath string) *Scanner {
 		"temp":         true,
 		".idea":        true,
 		".vscode":      true,
-		"bootstrap":    true,  // Laravel bootstrap cache
-		"public":       false, // Keep public, might have PHP files
 	}
 
 	return &Scanner{
