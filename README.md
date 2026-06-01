@@ -15,6 +15,7 @@ The initial release focuses on **PHP support**, with additional languages planne
 - 🕸️ Dependency Mapping — Builds comprehensive graphs showing code relationships
 - 📊 Complexity Metrics — Identifies areas of high complexity
 - 🎯 Usage Tracking — Finds where functions and classes are used across the project
+- 🤖 Native MCP Server — Exposes code dependency search, caller tracing, and dead code detection directly to AI agents (like Cursor, Claude Desktop, and Zed)
 - 👻 Dead Code Detection — Flags unused or orphaned code
 - ⚡ High Performance — Concurrent processing for fast analysis of large projects
 
@@ -52,6 +53,9 @@ tukey -v --output analysis.json /path/to/your/php/project
 
 # Exclude directories
 tukey --exclude vendor --exclude tests /path/to/your/php/project
+
+# Start a native Model Context Protocol (MCP) server for AI agents
+tukey mcp analysis.json
 ```
 
 ## Configuration
@@ -81,11 +85,43 @@ If you prefer JSON, you can use a `.tukey.json` file instead.
 }
 ```
 
-## AI Agent Integration (Tukey Skill)
+## AI Agent Integration (Tukey Skill & MCP Server)
 
-Tukey is natively designed to act as a **machine-readable codebase map for AI agents** (like Gemini, Claude, and agentic coding assistants). If you are using AI agents to explore or edit your codebase, they can leverage Tukey as a local tool to perform highly optimized, token-saving structural queries.
+Tukey is natively designed to act as a **machine-readable codebase map for AI agents** (like Gemini, Claude, Cursor, and other agentic coding assistants). If you are using AI agents to explore or edit your codebase, Tukey offers two integration pathways:
 
-To learn how to install, configure, and use Tukey as an AI agent skill, see [docs/tukey_skill.md](file:///Users/nathanael/Projects/tukey/docs/tukey_skill.md).
+### 1. Native Model Context Protocol (MCP) Server
+Tukey features a built-in MCP server that communicates via JSON-RPC 2.0 over standard I/O (stdin/stdout). This allows compatible tools (e.g., Claude Desktop, Cursor, Zed) to invoke Tukey tools directly within the agent's tool-use loop without shell execution permissions or subprocess spawning overhead.
+
+#### Quick Start (MCP)
+1. **Analyze your codebase** to generate the graph file:
+   ```bash
+   tukey -o tukey-results.json /path/to/your/project
+   ```
+2. **Start the MCP server**:
+   ```bash
+   tukey mcp tukey-results.json
+   ```
+
+To configure the server in your MCP host (like `mcpSettings.json`), add:
+```json
+{
+  "mcpServers": {
+    "tukey": {
+      "command": "tukey",
+      "args": ["mcp", "/absolute/path/to/your/tukey-results.json"]
+    }
+  }
+}
+```
+
+Exposed MCP Tools:
+- `tukey_find_symbol` — Locate classes, methods, and functions.
+- `tukey_get_callers` — Trace what calls/references a symbol.
+- `tukey_get_dependents` — Trace what a symbol depends on.
+- `tukey_find_orphans` — Identify candidate dead or orphaned code.
+
+### 2. Tukey Command Line Skill
+You can also feed Tukey's compact query capabilities directly to LLMs as a CLI skill. For a detailed guide on CLI-based agent configurations, see [docs/tukey_skill.md](docs/tukey_skill.md).
 
 ## Use Cases
 
