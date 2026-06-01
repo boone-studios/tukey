@@ -252,7 +252,7 @@ func parseArgs() (*Config, error) {
 		case "-h", "--help":
 			argv.ShowHelp = true
 			return argv, nil
-		case "--version":
+		case "-V", "--version":
 			argv.ShowVersion = true
 			return argv, nil
 		case "-o", "--output":
@@ -314,7 +314,7 @@ FLAGS (analysis):
     --exclude <dir>         Exclude directory from analysis (can be used multiple times)
     -h, --help              Show this help message
     -l, --language          Specify the programming language to use
-    --version               Show version information
+    -V, --version           Show version information
 
 QUERY FLAGS:
     --find <term>           Find nodes whose name contains term (case-insensitive)
