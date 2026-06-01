@@ -21,12 +21,22 @@ import (
 	_ "github.com/boone-studios/tukey/internal/lang"
 )
 
-const version = "0.3.0"
+var (
+	version = "0.3.0"
+	commit  = "none"
+	date    = "unknown"
+)
 
 func main() {
 	// Dispatch query subcommand before any analysis work.
 	if len(os.Args) > 1 && os.Args[1] == "query" {
 		runQuery(os.Args[2:])
+		return
+	}
+
+	// Dispatch mcp subcommand.
+	if len(os.Args) > 1 && os.Args[1] == "mcp" {
+		runMCPServer(os.Args[2:])
 		return
 	}
 
@@ -45,7 +55,15 @@ func main() {
 	argv = mergeConfigs(argv, fileCfg)
 
 	if argv.ShowVersion {
-		fmt.Printf("Tukey v%s\n", version)
+		displayVersion := version
+		if strings.HasPrefix(displayVersion, "v") {
+			displayVersion = displayVersion[1:]
+		}
+		if commit != "none" && date != "unknown" {
+			fmt.Printf("Tukey v%s (commit: %s, date: %s)\n", displayVersion, commit, date)
+		} else {
+			fmt.Printf("Tukey v%s\n", displayVersion)
+		}
 		os.Exit(0)
 	}
 
@@ -288,6 +306,7 @@ func showHelp() {
 USAGE:
     tukey [FLAGS] <directory>       Run analysis on a codebase
     tukey query [FLAG] <file>       Query a pre-built analysis file
+    tukey mcp [FLAG] [file]         Start a native Model Context Protocol (MCP) server
 
 FLAGS (analysis):
     -v, --verbose           Show detailed output including function usage report
@@ -302,6 +321,9 @@ QUERY FLAGS:
     --callers <name>        Show all nodes that call or reference the named symbol
     --dependents <name>     Show all nodes that the named symbol depends on
     --orphans               List all orphaned nodes (dead code candidates)
+
+MCP FLAGS:
+    -h, --help              Show help message for MCP subcommand
 
 CONFIGURATION:
     Tukey will automatically load settings from a config file in the project root
@@ -322,6 +344,7 @@ EXAMPLES:
     tukey query --callers "makeApiRequest" analysis.json
     tukey query --dependents "PaymentService" analysis.json
     tukey query --orphans analysis.json
+    tukey mcp analysis.json
 
 `, version)
 }
