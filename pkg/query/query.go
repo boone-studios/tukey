@@ -13,7 +13,7 @@ import (
 	"github.com/boone-studios/tukey/internal/models"
 )
 
-// NodeResult is a single entry returned by all query types.
+// NodeResult is a single entry returned by all query types
 type NodeResult struct {
 	ID              string `json:"id"`
 	Name            string `json:"name"`
@@ -25,13 +25,13 @@ type NodeResult struct {
 	Score           int    `json:"score"`
 	DependencyCount int    `json:"dependencyCount"`
 	DependentCount  int    `json:"dependentCount"`
-	// Populated for --callers and --dependents to show how nodes are connected.
+	// Populated for --callers and --dependents to show how nodes are connected
 	RefType  string `json:"refType,omitempty"`
 	RefLines []int  `json:"refLines,omitempty"`
 	RefCount int    `json:"refCount,omitempty"`
 }
 
-// QueryResult is the JSON envelope returned by every query operation.
+// QueryResult is the JSON envelope returned by every query operation
 type QueryResult struct {
 	Query   string       `json:"query"`
 	Term    string       `json:"term,omitempty"`
@@ -39,7 +39,7 @@ type QueryResult struct {
 	Results []NodeResult `json:"results"`
 }
 
-// Engine queries a pre-built Tukey analysis file without re-running analysis.
+// Engine queries a pre-built Tukey analysis file without re-running analysis
 type Engine struct {
 	graph *models.DependencyGraph
 }
@@ -49,7 +49,7 @@ type analysisEnvelope struct {
 }
 
 // Load reads a Tukey analysis JSON file (e.g. produced by tukey -o analysis.json)
-// and returns a ready Engine.
+// and returns a ready Engine
 func Load(path string) (*Engine, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -65,7 +65,12 @@ func Load(path string) (*Engine, error) {
 	return &Engine{graph: env.Graph}, nil
 }
 
-// Find returns all nodes whose name contains term (case-insensitive substring).
+// Graph returns the underlying dependency graph
+func (e *Engine) Graph() *models.DependencyGraph {
+	return e.graph
+}
+
+// Find returns all nodes whose name contains term (case-insensitive substring)
 func (e *Engine) Find(term string) QueryResult {
 	// Try direct ID lookup first
 	if node, exists := e.graph.Nodes[term]; exists {
@@ -91,8 +96,8 @@ func (e *Engine) Find(term string) QueryResult {
 	return QueryResult{Query: "find", Term: term, Count: len(results), Results: coalesce(results)}
 }
 
-// Callers returns all nodes that call or reference the named symbol (incoming edges).
-// When multiple nodes share the same name, results are merged across all matches.
+// Callers returns all nodes that call or reference the named symbol (incoming edges)
+// When multiple nodes share the same name, results are merged across all matches
 func (e *Engine) Callers(term string) QueryResult {
 	targets := e.findNodes(term)
 	seen := make(map[string]bool)
@@ -118,8 +123,8 @@ func (e *Engine) Callers(term string) QueryResult {
 	return QueryResult{Query: "callers", Term: term, Count: len(results), Results: coalesce(results)}
 }
 
-// Dependents returns all nodes that the named symbol directly depends on (outgoing edges).
-// When multiple nodes share the same name, results are merged across all matches.
+// Dependents returns all nodes that the named symbol directly depends on (outgoing edges)
+// When multiple nodes share the same name, results are merged across all matches
 func (e *Engine) Dependents(term string) QueryResult {
 	targets := e.findNodes(term)
 	seen := make(map[string]bool)
@@ -145,7 +150,7 @@ func (e *Engine) Dependents(term string) QueryResult {
 	return QueryResult{Query: "dependents", Term: term, Count: len(results), Results: coalesce(results)}
 }
 
-// Orphans returns all nodes with no dependencies and no dependents (dead code candidates).
+// Orphans returns all nodes with no dependencies and no dependents (dead code candidates)
 func (e *Engine) Orphans() QueryResult {
 	var results []NodeResult
 	for _, node := range e.graph.Orphans {
@@ -155,7 +160,7 @@ func (e *Engine) Orphans() QueryResult {
 	return QueryResult{Query: "orphans", Count: len(results), Results: coalesce(results)}
 }
 
-// getNodeNames returns all possible candidate names for a node to match against.
+// getNodeNames returns all possible candidate names for a node to match against
 func (e *Engine) getNodeNames(node *models.DependencyNode) []string {
 	names := []string{node.Name}
 
@@ -177,7 +182,7 @@ func (e *Engine) getNodeNames(node *models.DependencyNode) []string {
 }
 
 // findNodes returns all nodes whose name exactly matches term (case-insensitive),
-// falling back to a substring match when there are no exact matches.
+// falling back to a substring match when there are no exact matches
 func (e *Engine) findNodes(term string) []*models.DependencyNode {
 	// Try direct ID lookup first (exact match)
 	if node, exists := e.graph.Nodes[term]; exists {
@@ -238,7 +243,7 @@ func sortResults(results []NodeResult) {
 	})
 }
 
-// coalesce ensures callers never get a JSON null instead of an empty array.
+// coalesce ensures callers never get a JSON null instead of an empty array
 func coalesce(results []NodeResult) []NodeResult {
 	if results == nil {
 		return []NodeResult{}

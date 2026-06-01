@@ -244,3 +244,40 @@ func TestParseArgs_MultiLanguage(t *testing.T) {
 		t.Errorf("expected php,js, got %s", cfg.Language)
 	}
 }
+
+func TestParseArgs_Benchmark(t *testing.T) {
+	oldArgs := os.Args
+	defer func() { os.Args = oldArgs }()
+
+	os.Args = []string{"tukey", "-b", "myproj"}
+	cfg, err := parseArgs()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.Benchmark {
+		t.Errorf("expected benchmark mode to be active via -b")
+	}
+
+	os.Args = []string{"tukey", "--benchmark", "myproj"}
+	cfg, err = parseArgs()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !cfg.Benchmark {
+		t.Errorf("expected benchmark mode to be active via --benchmark")
+	}
+}
+
+func TestMergeConfigs_Benchmark(t *testing.T) {
+	argv := &Config{
+		RootPath: "myproj",
+	}
+	fileCfg := &config.FileConfig{
+		Benchmark: true,
+	}
+
+	merged := mergeConfigs(argv, fileCfg)
+	if !merged.Benchmark {
+		t.Errorf("expected benchmark to merge as true")
+	}
+}

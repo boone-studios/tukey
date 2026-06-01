@@ -14,6 +14,8 @@ type FileConfig struct {
 	ExcludeDirs []string `json:"excludeDirs" yaml:"excludeDirs"`
 	OutputFile  string   `json:"outputFile" yaml:"outputFile"`
 	Verbose     bool     `json:"verbose" yaml:"verbose"`
+	Benchmark   bool     `json:"benchmark" yaml:"benchmark"`
+	ComparePath string   `json:"comparePath" yaml:"comparePath"`
 }
 
 func LoadConfig(projectRoot string) (*FileConfig, error) {

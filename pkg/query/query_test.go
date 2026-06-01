@@ -11,7 +11,7 @@ import (
 	"github.com/boone-studios/tukey/internal/models"
 )
 
-// buildTestEngine returns an Engine backed by a synthetic graph for unit tests.
+// buildTestEngine returns an Engine backed by a synthetic graph for unit tests
 func buildTestEngine() *Engine {
 	gateway := &models.DependencyNode{
 		ID:        "class:App\\Factories\\GatewayFactory:15",
@@ -91,10 +91,10 @@ func buildTestEngine() *Engine {
 
 	graph := &models.DependencyGraph{
 		Nodes: map[string]*models.DependencyNode{
-			gateway.ID:   gateway,
+			gateway.ID:    gateway,
 			httpClient.ID: httpClient,
-			payment.ID:   payment,
-			orphan.ID:    orphan,
+			payment.ID:    payment,
+			orphan.ID:     orphan,
 		},
 		TotalNodes: 4,
 		TotalEdges: 3,
@@ -231,7 +231,7 @@ func TestLoad_MissingGraphField(t *testing.T) {
 func TestLoad_RoundTrip(t *testing.T) {
 	e := buildTestEngine()
 
-	// Marshal the engine's graph into an analysis envelope and write to a temp file.
+	// Marshal the engine's graph into an analysis envelope and write to a temp file
 	env := analysisEnvelope{Graph: e.graph}
 	data, err := json.MarshalIndent(env, "", "  ")
 	if err != nil {
@@ -261,7 +261,7 @@ func TestQueryResult_EmptyResultsNotNull(t *testing.T) {
 	if string(data) == "" {
 		t.Fatal("marshal failed")
 	}
-	// "results":null would break agent JSON parsers; it must be an array.
+	// "results":null would break agent JSON parsers; it must be an array
 	if !contains(string(data), `"results":[]`) {
 		t.Errorf("expected results to be [] not null, got: %s", string(data))
 	}
@@ -269,14 +269,14 @@ func TestQueryResult_EmptyResultsNotNull(t *testing.T) {
 
 func TestQuery_ResilientMatching(t *testing.T) {
 	methodNode := &models.DependencyNode{
-		ID:        "method:App\\Services\\PaymentService\\pay:30",
-		Name:      "pay",
-		Type:      "method",
-		File:      "app/Services/PaymentService.php",
-		Namespace: "App\\Services",
-		ClassName: "PaymentService",
-		Line:      30,
-		Score:     5,
+		ID:           "method:App\\Services\\PaymentService\\pay:30",
+		Name:         "pay",
+		Type:         "method",
+		File:         "app/Services/PaymentService.php",
+		Namespace:    "App\\Services",
+		ClassName:    "PaymentService",
+		Line:         30,
+		Score:        5,
 		Dependencies: map[string]*models.DependencyRef{},
 		Dependents:   map[string]*models.DependencyRef{},
 	}
@@ -330,7 +330,7 @@ func TestQuery_ResilientMatching(t *testing.T) {
 	t.Run("Fully-Qualified Class Match", func(t *testing.T) {
 		r := e.Find("App\\Services\\PaymentService")
 		// Find does substring matching, so it will match both the class
-		// and the class's method because the method's namespaced FQDN includes the class.
+		// and the class's method because the method's namespaced FQDN includes the class
 		if r.Count != 2 {
 			t.Errorf("FQ class lookup via Find failed: got %d results, want 2", r.Count)
 		}

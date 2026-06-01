@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -16,7 +17,9 @@ import (
 	"github.com/boone-studios/tukey/internal/parser"
 	"github.com/boone-studios/tukey/internal/progress"
 	"github.com/boone-studios/tukey/internal/scanner"
+	"github.com/boone-studios/tukey/pkg/compare"
 	"github.com/boone-studios/tukey/pkg/output"
+	"github.com/boone-studios/tukey/pkg/query"
 
 	_ "github.com/boone-studios/tukey/internal/lang"
 )
@@ -28,7 +31,7 @@ var (
 )
 
 func main() {
-	// Dispatch query subcommand before any analysis work.
+	// Dispatch query subcommand before any analysis work
 	if len(os.Args) > 1 && os.Args[1] == "query" {
 		runQuery(os.Args[2:])
 		return
@@ -112,25 +115,40 @@ func main() {
 	}
 
 	// Step 1: Scan for files
-	spinner := progress.NewSpinner("Scanning for code files...")
-	spinner.Start()
+	var spinner *progress.Spinner
+	if !argv.Benchmark {
+		spinner = progress.NewSpinner("Scanning for code files...")
+		spinner.Start()
+	}
 
+	scanStart := time.Now()
 	files, err := fileScanner.ScanFiles()
 	if err != nil {
-		spinner.Stop()
+		if spinner != nil {
+			spinner.Stop()
+		}
 		fmt.Printf("❌ Error scanning files: %v\n", err)
 		os.Exit(1)
 	}
+	scanTime := time.Since(scanStart)
 
-	spinner.Stop()
-	fmt.Printf("✅ Found %d files (%.2f MB total)\n",
-		len(files), float64(getTotalSize(files))/(1024*1024))
+	if spinner != nil {
+		spinner.Stop()
+	}
+
+	if !argv.Benchmark {
+		fmt.Printf("✅ Found %d files (%.2f MB total)\n",
+			len(files), float64(getTotalSize(files))/(1024*1024))
+	}
 
 	// Step 2: Parse files
-	fmt.Printf("🔧 Parsing project files and extracting elements...\n")
-	parseProgress := progress.NewProgressBar(len(files), "Parsing files")
+	var parseProgress *progress.ProgressBar
+	if !argv.Benchmark {
+		fmt.Printf("🔧 Parsing project files and extracting elements...\n")
+		parseProgress = progress.NewProgressBar(len(files), "Parsing files")
+	}
 
-	startTime := time.Now()
+	parseStart := time.Now()
 
 	// Group discovered files by their corresponding language parser
 	filesByParser := make(map[parser.LanguageParser][]models.FileInfo)
@@ -166,25 +184,36 @@ func main() {
 			parsedFiles = append(parsedFiles, pParsed...)
 		}
 	}
+	parseTime := time.Since(parseStart)
 
-	if len(parseErrors) > 0 {
+	if len(parseErrors) > 0 && !argv.Benchmark {
 		fmt.Fprintf(os.Stderr, "⚠️ Parser warnings:\n - %s\n", strings.Join(parseErrors, "\n - "))
 	}
 
 	totalElements := getTotalElements(parsedFiles)
-	fmt.Printf("✅ Parsing complete! Found %d code elements in %d files\n",
-		totalElements, len(parsedFiles))
+	if !argv.Benchmark {
+		fmt.Printf("✅ Parsing complete! Found %d code elements in %d files\n",
+			totalElements, len(parsedFiles))
+	}
 
 	// Step 3: Build dependency graph
-	dependencySpinner := progress.NewSpinner("Building dependency relationships...")
-	dependencySpinner.Start()
+	var dependencySpinner *progress.Spinner
+	if !argv.Benchmark {
+		dependencySpinner = progress.NewSpinner("Building dependency relationships...")
+		dependencySpinner.Start()
+	}
 
+	graphStart := time.Now()
 	tracker := analyzer.NewDependencyTracker()
 	graph := tracker.BuildDependencyGraph(parsedFiles)
+	graphTime := time.Since(graphStart)
 
-	dependencySpinner.Stop()
+	if dependencySpinner != nil {
+		dependencySpinner.Stop()
+	}
 
-	processingTime := time.Since(startTime)
+	processingTime := time.Since(parseStart) // Original Tukey timed from parse start to graph end
+	totalTime := time.Since(scanStart)
 
 	// Create result object
 	result := &models.AnalysisResult{
@@ -196,27 +225,92 @@ func main() {
 	}
 
 	// Step 4: Display results
-	formatter := output.NewConsoleFormatter()
-	formatter.PrintSummary(result, argv.Verbose)
+	if !argv.Benchmark {
+		formatter := output.NewConsoleFormatter()
+		formatter.PrintSummary(result, argv.Verbose)
+	}
+
+	// Run comparison/regression report if a baseline is specified
+	if argv.ComparePath != "" {
+		baselineEngine, err := query.Load(argv.ComparePath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Error loading baseline JSON file: %v\n", err)
+			os.Exit(1)
+		}
+		comparisonReport := compare.CompareGraphs(baselineEngine.Graph(), graph)
+		compare.PrintComparisonReport(comparisonReport, len(graph.Orphans))
+	}
 
 	// Step 5: Export if requested
+	var exportTime time.Duration
 	if argv.OutputFile != "" {
-		exportSpinner := progress.NewSpinner(fmt.Sprintf("Exporting to %s...", argv.OutputFile))
-		exportSpinner.Start()
+		var exportSpinner *progress.Spinner
+		if !argv.Benchmark {
+			exportSpinner = progress.NewSpinner(fmt.Sprintf("Exporting to %s...", argv.OutputFile))
+			exportSpinner.Start()
+		}
 
+		exportStart := time.Now()
 		exporter := output.NewJSONExporter()
 		if err := exporter.Export(result, argv.OutputFile); err != nil {
-			exportSpinner.Stop()
+			if exportSpinner != nil {
+				exportSpinner.Stop()
+			}
 			fmt.Printf("❌ Error exporting: %v\n", err)
 			os.Exit(1)
 		}
+		exportTime = time.Since(exportStart)
 
-		exportSpinner.Stop()
-		fmt.Printf("✅ Analysis exported to %s\n", argv.OutputFile)
+		if exportSpinner != nil {
+			exportSpinner.Stop()
+		}
+		if !argv.Benchmark {
+			fmt.Printf("✅ Analysis exported to %s\n", argv.OutputFile)
+		}
 	}
 
-	fmt.Printf("\n🎉 Analysis complete! Processed %d files with %d dependencies\n",
-		len(files), graph.TotalEdges)
+	if argv.Benchmark {
+		var memStats runtime.MemStats
+		runtime.ReadMemStats(&memStats)
+
+		totalSizeMB := float64(getTotalSize(files)) / (1024 * 1024)
+		filesPerSec := float64(len(parsedFiles)) / parseTime.Seconds()
+		mbPerSec := totalSizeMB / parseTime.Seconds()
+
+		fmt.Println()
+		fmt.Println("======================================================================")
+		fmt.Println("⚡ TUKEY PERFORMANCE BENCHMARK")
+		fmt.Println("======================================================================")
+		fmt.Printf("📂 Codebase Metrics:\n")
+		fmt.Printf("   • Total Discovered Files:  %d\n", len(files))
+		fmt.Printf("   • Total Parsed Files:      %d\n", len(parsedFiles))
+		fmt.Printf("   • Total Code Elements:     %d\n", totalElements)
+		fmt.Printf("   • Total Codebase Size:     %.2f MB\n", totalSizeMB)
+		fmt.Println()
+		fmt.Printf("⏱️ Phase Durations:\n")
+		fmt.Printf("   • File Scanning:           %s\n", scanTime)
+		if parseTime.Seconds() > 0 {
+			fmt.Printf("   • File Parsing:            %s (%.2f MB/sec, %.1f files/sec)\n", parseTime, mbPerSec, filesPerSec)
+		} else {
+			fmt.Printf("   • File Parsing:            %s\n", parseTime)
+		}
+		fmt.Printf("   • Graph Building:          %s\n", graphTime)
+		if argv.OutputFile != "" {
+			fmt.Printf("   • Export to JSON:          %s\n", exportTime)
+		}
+		fmt.Printf("   • Total Elapsed Time:      %s\n", totalTime)
+		fmt.Println()
+		fmt.Printf("🧠 Memory & System Stats:\n")
+		fmt.Printf("   • Heap Alloc:              %.2f MB\n", float64(memStats.Alloc)/(1024*1024))
+		fmt.Printf("   • Total Heap Allocated:    %.2f MB\n", float64(memStats.TotalAlloc)/(1024*1024))
+		fmt.Printf("   • Virtual Memory (Sys):    %.2f MB\n", float64(memStats.Sys)/(1024*1024))
+		fmt.Printf("   • Active Goroutines:       %d\n", runtime.NumGoroutine())
+		fmt.Printf("   • Garbage Collections:     %d\n", memStats.NumGC)
+		fmt.Println("======================================================================")
+	} else {
+		fmt.Printf("\n🎉 Analysis complete! Processed %d files with %d dependencies\n",
+			len(files), graph.TotalEdges)
+	}
 }
 
 // Config holds application configuration
@@ -224,6 +318,8 @@ type Config struct {
 	RootPath    string
 	OutputFile  string
 	Verbose     bool
+	Benchmark   bool
+	ComparePath string
 	ShowHelp    bool
 	ShowVersion bool
 	ExcludeDirs []string
@@ -249,6 +345,14 @@ func parseArgs() (*Config, error) {
 		switch arg {
 		case "-v", "--verbose":
 			argv.Verbose = true
+		case "-b", "--benchmark":
+			argv.Benchmark = true
+		case "-c", "--compare":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("--compare requires a baseline JSON file")
+			}
+			argv.ComparePath = args[i+1]
+			i++
 		case "-h", "--help":
 			argv.ShowHelp = true
 			return argv, nil
@@ -310,6 +414,8 @@ USAGE:
 
 FLAGS (analysis):
     -v, --verbose           Show detailed output including function usage report
+    -b, --benchmark         Run in benchmark mode (disables spinners and prints detailed performance metrics)
+    -c, --compare <file>    Compare current codebase with a baseline JSON analysis file (regression detection)
     -o, --output <file>     Export results to JSON file
     --exclude <dir>         Exclude directory from analysis (can be used multiple times)
     -h, --help              Show this help message
@@ -338,6 +444,8 @@ CONFIGURATION:
 
 EXAMPLES:
     tukey ./my-project
+    tukey -b ./my-project
+    tukey --compare baseline.json ./my-project
     tukey -v ./my-project -o analysis.json
     tukey --exclude vendor --exclude tests ./my-project
     tukey query --find "GatewayFactory" analysis.json
@@ -367,7 +475,7 @@ func getTotalElements(parsedFiles []*models.ParsedFile) int {
 	return total
 }
 
-// mergeConfigs merges CLI args with file config, giving CLI priority.
+// mergeConfigs merges CLI args with file config, giving CLI priority
 func mergeConfigs(argv *Config, fileCfg *config.FileConfig) *Config {
 	if argv.Language == "" && fileCfg.Language != "" {
 		argv.Language = fileCfg.Language
@@ -380,6 +488,12 @@ func mergeConfigs(argv *Config, fileCfg *config.FileConfig) *Config {
 	}
 	if !argv.Verbose && fileCfg.Verbose {
 		argv.Verbose = true
+	}
+	if !argv.Benchmark && fileCfg.Benchmark {
+		argv.Benchmark = true
+	}
+	if argv.ComparePath == "" && fileCfg.ComparePath != "" {
+		argv.ComparePath = fileCfg.ComparePath
 	}
 	return argv
 }

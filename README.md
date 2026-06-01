@@ -215,6 +215,8 @@ Identify refactoring opportunities:
 * **Language-agnostic design**: while starting with PHP, the parser interface makes adding new languages straightforward.
 * **Zero infrastructure**: unlike SonarQube, Tukey is just a single binary — no servers, no databases.
 
+For an in-depth, philosophical and technical analysis of how Tukey compares to enterprise quality gates, see the [SonarQube Comparison Guide](docs/sonarqube_comparison.md).
+
 ## Architecture
 
 The tool follows clean architecture principles:
@@ -261,12 +263,16 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Roadmap
 
-- [ ] Web dashboard for dependency visualization
+For an in-depth, multi-phase breakdown of Tukey's long-term vision, proposed implementation details, and tracking, see the [Development Roadmap](ROADMAP.md).
+
+Quick summary of upcoming targets:
+- [ ] Circular dependency detection & cycles analysis
+- [ ] Version Control (Git) Integration (complexity vs. churn and blast radius analysis)
+- [ ] Architectural boundary enforcement & layer guardrails (`tukey check`)
+- [ ] AI Agent MCP micro-graph context pruning
+- [ ] Polyglot analysis (TypeScript/Go) & dynamic execution traces
+- [ ] Web dashboard for interactive dependency visualization
 - [ ] Integration with popular IDEs
-- [ ] Laravel-specific analysis patterns
-- [ ] Circular dependency detection
-- [ ] Performance bottleneck identification
-- [ ] Git integration for change impact analysis
 
 ## Acknowledgments
 
