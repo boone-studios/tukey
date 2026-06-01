@@ -81,6 +81,12 @@ If you prefer JSON, you can use a `.tukey.json` file instead.
 }
 ```
 
+## AI Agent Integration (Tukey Skill)
+
+Tukey is natively designed to act as a **machine-readable codebase map for AI agents** (like Gemini, Claude, and agentic coding assistants). If you are using AI agents to explore or edit your codebase, they can leverage Tukey as a local tool to perform highly optimized, token-saving structural queries.
+
+To learn how to install, configure, and use Tukey as an AI agent skill, see [docs/tukey_skill.md](file:///Users/nathanael/Projects/tukey/docs/tukey_skill.md).
+
 ## Use Cases
 
 ### Legacy Code Understanding

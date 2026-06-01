@@ -125,6 +125,80 @@ func TestMergeConfigs_FileProvidesDefaults(t *testing.T) {
 	}
 }
 
+func TestParseQueryArgs_Find(t *testing.T) {
+	cfg, err := parseQueryArgs([]string{"--find", "GatewayFactory", "analysis.json"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.mode != "find" {
+		t.Errorf("mode: got %q want find", cfg.mode)
+	}
+	if cfg.term != "GatewayFactory" {
+		t.Errorf("term: got %q want GatewayFactory", cfg.term)
+	}
+	if cfg.inputFile != "analysis.json" {
+		t.Errorf("inputFile: got %q want analysis.json", cfg.inputFile)
+	}
+}
+
+func TestParseQueryArgs_Orphans(t *testing.T) {
+	cfg, err := parseQueryArgs([]string{"--orphans", "analysis.json"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.mode != "orphans" {
+		t.Errorf("mode: got %q want orphans", cfg.mode)
+	}
+	if cfg.term != "" {
+		t.Errorf("term should be empty for --orphans")
+	}
+}
+
+func TestParseQueryArgs_Help(t *testing.T) {
+	cfg, err := parseQueryArgs([]string{"--help"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg != nil {
+		t.Error("expected nil cfg for --help")
+	}
+}
+
+func TestParseQueryArgs_MissingMode(t *testing.T) {
+	_, err := parseQueryArgs([]string{"analysis.json"})
+	if err == nil {
+		t.Error("expected error when no mode flag given")
+	}
+}
+
+func TestParseQueryArgs_MissingFile(t *testing.T) {
+	_, err := parseQueryArgs([]string{"--find", "Foo"})
+	if err == nil {
+		t.Error("expected error when no input file given")
+	}
+}
+
+func TestParseQueryArgs_MissingTerm(t *testing.T) {
+	tests := [][]string{
+		{"--find"},
+		{"--callers"},
+		{"--dependents"},
+	}
+	for _, args := range tests {
+		_, err := parseQueryArgs(args)
+		if err == nil {
+			t.Errorf("expected error for args %v", args)
+		}
+	}
+}
+
+func TestParseQueryArgs_UnknownFlag(t *testing.T) {
+	_, err := parseQueryArgs([]string{"--unknown", "analysis.json"})
+	if err == nil {
+		t.Error("expected error for unknown flag")
+	}
+}
+
 func TestMergeConfigs_CLIOverridesFile(t *testing.T) {
 	argv := &Config{
 		RootPath:    "myproj",
@@ -153,5 +227,20 @@ func TestMergeConfigs_CLIOverridesFile(t *testing.T) {
 	}
 	if len(merged.ExcludeDirs) != 2 {
 		t.Errorf("expected merged excludeDirs length 2, got %d", len(merged.ExcludeDirs))
+	}
+}
+
+func TestParseArgs_MultiLanguage(t *testing.T) {
+	// Back up os.Args
+	oldArgs := os.Args
+	defer func() { os.Args = oldArgs }()
+
+	os.Args = []string{"tukey", "-l", "php,js", "myproj"}
+	cfg, err := parseArgs()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Language != "php,js" {
+		t.Errorf("expected php,js, got %s", cfg.Language)
 	}
 }

@@ -325,3 +325,84 @@ When making non‑trivial changes:
 
 Following these guidelines will help maintain Tukey’s goal: a **fast, language‑agnostic map** of large codebases that highlights **dependencies, complexity, and dead code** with minimal friction for users.
 
+---
+
+### 10. `tukey query` – Agent‑Friendly Graph Queries
+
+The `query` subcommand reads a **pre-built analysis JSON file** and answers targeted questions without re-running the full analysis pipeline. It emits compact JSON to stdout, making it easy for agents to consume symbol locations or dependency information with minimal token cost.
+
+#### 10.1 Invocation
+
+```
+tukey query --find <term>          analysis.json
+tukey query --callers <name>       analysis.json
+tukey query --dependents <name>    analysis.json
+tukey query --orphans              analysis.json
+```
+
+All flags are mutually exclusive; exactly one must be provided alongside the path to an analysis file.
+
+#### 10.2 Query Modes
+
+| Flag | What it returns |
+|---|---|
+| `--find <term>` | All nodes whose name, namespace, or member matches or contains `<term>` (case-insensitive, fallback to substring). |
+| `--callers <name>` | All nodes that **call or reference** the named symbol (incoming edges). |
+| `--dependents <name>` | All nodes that the named symbol **directly depends on** (outgoing edges). |
+| `--orphans` | All nodes with **no dependencies and no dependents** (dead code candidates). |
+
+For `--find`, `--callers`, and `--dependents`, the query engine is highly resilient and supports matching a symbol in several ways:
+- **Short Name**: Just the unqualified symbol name (e.g., `GatewayFactory` or `pay`).
+- **Namespaced Short Name**: The namespace plus the short name (e.g., `App\Factories\GatewayFactory` or `App\Services\pay`).
+- **Class-Scoped Member Name**: The class name and member (e.g., `PaymentService::pay`).
+- **Fully-Qualified Member Name**: The full namespace, class, and member (e.g., `App\Services\PaymentService::pay`).
+- **Exact Node ID**: The unique stable identifier (e.g., `class:App\Services\PaymentService:5` or `method:App\Services\PaymentService\pay:30`), which resolves in $O(1)$ time.
+
+For `--callers` and `--dependents`, an exact match is preferred using the same candidate resolution, falling back to partial matches if no exact match is found. When multiple nodes match the term (e.g., a method name shared across multiple classes), results are merged across all matches.
+
+#### 10.3 Output Schema
+
+Every query returns the same JSON envelope:
+
+```json
+{
+  "query":   "find | callers | dependents | orphans",
+  "term":    "<search term>",
+  "count":   42,
+  "results": [
+    {
+      "id":              "class:App\\Factories\\GatewayFactory:15",
+      "name":            "GatewayFactory",
+      "type":            "class",
+      "file":            "/abs/path/to/GatewayFactory.php",
+      "namespace":       "App\\Factories",
+      "className":       "",
+      "line":            15,
+      "score":           12,
+      "dependencyCount": 3,
+      "dependentCount":  5,
+      "refType":         "instantiation",
+      "refLines":        [30, 45],
+      "refCount":        2
+    }
+  ]
+}
+```
+
+- `term` is omitted for `--orphans`.  
+- `namespace` and `className` are omitted when empty.  
+- `refType`, `refLines`, and `refCount` are only present on `--callers` and `--dependents` results; they describe how this node references (or is referenced by) the queried symbol.  
+- `results` is always a JSON array (never `null`).
+
+#### 10.4 Implementation
+
+- **`pkg/query/query.go`** – `Engine` struct and query methods (`Find`, `Callers`, `Dependents`, `Orphans`).
+- **`pkg/query/query_test.go`** – unit tests using a synthetic graph.
+- **`cmd/tukey/query_cmd.go`** – CLI argument parsing (`parseQueryArgs`) and output encoding.
+- **`cmd/tukey/main.go`** – dispatches to `runQuery(os.Args[2:])` before the analysis path when `os.Args[1] == "query"`.
+
+Agents working on the query subcommand should follow the same conventions:
+- Keep `pkg/query` free of CLI concerns; all user‑facing formatting belongs in `cmd/tukey/query_cmd.go`.
+- The `Engine` depends only on `*models.DependencyGraph` so it can be unit‑tested without a file system.
+- Never change the output schema in a backwards‑incompatible way; downstream agents parse this JSON.
+

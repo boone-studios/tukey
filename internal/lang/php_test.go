@@ -207,3 +207,60 @@ enum Status: string implements BackedEnum {
 			foundFinalClass, foundEnum, foundTrait, foundUsesTrait, extendsUsage, implementsUsage, enumImplements, traitUseEdge)
 	}
 }
+
+func TestPHPParser_BraceDepthAndGroupUse(t *testing.T) {
+	tmp := t.TempDir()
+	code := `<?php
+namespace App\Models;
+
+// Let's test group use statements
+use App\Services\{Mailer, PaymentService as Pay, Logger};
+
+/*
+ * This is a multi-line comment with braces {}
+ * that shouldn't affect brace depth tracking!
+ */
+class Order {
+    // A comment with a { brace
+    public function process() {
+        $x = "braces inside a string: {} { }";
+        $y = '{';
+        $z = '}';
+    }
+}
+`
+	path := writePHP(t, tmp, "Order.php", code)
+
+	p := NewPHPParser()
+	parsed, err := p.ParseFile(path)
+	if err != nil {
+		t.Fatalf("ParseFile error: %v", err)
+	}
+
+	// 1. Verify group use parsing
+	expectedUses := []string{"App\\Services\\Mailer", "App\\Services\\PaymentService", "App\\Services\\Logger"}
+	if len(parsed.Uses) != 3 {
+		t.Fatalf("expected 3 use statements, got %d: %+v", len(parsed.Uses), parsed.Uses)
+	}
+	for i, expected := range expectedUses {
+		if parsed.Uses[i] != expected {
+			t.Errorf("expected use [%d] to be %q, got %q", i, expected, parsed.Uses[i])
+		}
+	}
+
+	// 2. Verify brace depth tracking worked perfectly
+	// If brace depth tracking is broken by strings or comments, the Order class will be closed prematurely,
+	// and elements or methods might not be associated with their class, or parsing will be misaligned.
+	var foundMethod bool
+	for _, el := range parsed.Elements {
+		if el.Type == "method" && el.Name == "process" {
+			foundMethod = true
+			if el.ClassName != "Order" {
+				t.Errorf("expected process() to be in class Order, got %q", el.ClassName)
+			}
+		}
+	}
+	if !foundMethod {
+		t.Error("expected to find method 'process' inside class Order")
+	}
+}

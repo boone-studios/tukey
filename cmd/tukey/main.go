@@ -6,6 +6,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -23,6 +24,12 @@ import (
 const version = "0.3.0"
 
 func main() {
+	// Dispatch query subcommand before any analysis work.
+	if len(os.Args) > 1 && os.Args[1] == "query" {
+		runQuery(os.Args[2:])
+		return
+	}
+
 	argv, err := parseArgs()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -54,14 +61,32 @@ func main() {
 	// Initialize components
 	fileScanner := scanner.NewScanner(argv.RootPath)
 
-	p, ok := parser.Get(argv.Language)
-	if !ok {
-		fmt.Fprintf(os.Stderr, "❌ Unsupported language: %s\n", argv.Language)
-		fmt.Fprintf(os.Stderr, "Supported: %v\n", parser.SupportedLanguages())
+	// Resolve active languages and merge file extensions
+	langParts := strings.Split(argv.Language, ",")
+	var activeParsers []parser.LanguageParser
+	var mergedExtensions []string
+
+	for _, part := range langParts {
+		langKey := strings.TrimSpace(part)
+		if langKey == "" {
+			continue
+		}
+		p, ok := parser.Get(langKey)
+		if !ok {
+			fmt.Fprintf(os.Stderr, "❌ Unsupported language: %s\n", langKey)
+			fmt.Fprintf(os.Stderr, "Supported: %v\n", parser.SupportedLanguages())
+			os.Exit(1)
+		}
+		activeParsers = append(activeParsers, p)
+		mergedExtensions = append(mergedExtensions, p.FileExtensions()...)
+	}
+
+	if len(activeParsers) == 0 {
+		fmt.Fprintf(os.Stderr, "❌ No programming languages selected.\n")
 		os.Exit(1)
 	}
 
-	fileScanner.SetExtensions(p.FileExtensions())
+	fileScanner.SetExtensions(mergedExtensions)
 
 	// Configure scanner exclusions
 	for _, dir := range argv.ExcludeDirs {
@@ -88,10 +113,44 @@ func main() {
 	parseProgress := progress.NewProgressBar(len(files), "Parsing files")
 
 	startTime := time.Now()
-	parsedFiles, err := p.ProcessFiles(files, parseProgress)
-	if err != nil {
-		fmt.Printf("❌ Error parsing files: %v\n", err)
-		os.Exit(1)
+
+	// Group discovered files by their corresponding language parser
+	filesByParser := make(map[parser.LanguageParser][]models.FileInfo)
+	for _, f := range files {
+		ext := strings.ToLower(filepath.Ext(f.Path))
+		var matchedParser parser.LanguageParser
+		for _, p := range activeParsers {
+			for _, parserExt := range p.FileExtensions() {
+				if parserExt == ext {
+					matchedParser = p
+					break
+				}
+			}
+			if matchedParser != nil {
+				break
+			}
+		}
+
+		if matchedParser != nil {
+			filesByParser[matchedParser] = append(filesByParser[matchedParser], f)
+		}
+	}
+
+	var parsedFiles []*models.ParsedFile
+	var parseErrors []string
+
+	// Process each parser's files
+	for p, pFiles := range filesByParser {
+		pParsed, err := p.ProcessFiles(pFiles, parseProgress)
+		if err != nil {
+			parseErrors = append(parseErrors, fmt.Sprintf("%s parser error: %v", p.Language(), err))
+		} else {
+			parsedFiles = append(parsedFiles, pParsed...)
+		}
+	}
+
+	if len(parseErrors) > 0 {
+		fmt.Fprintf(os.Stderr, "⚠️ Parser warnings:\n - %s\n", strings.Join(parseErrors, "\n - "))
 	}
 
 	totalElements := getTotalElements(parsedFiles)
@@ -227,15 +286,22 @@ func showHelp() {
 	fmt.Printf(`Tukey v%s
 
 USAGE:
-    Tukey [FLAGS] <directory>
+    tukey [FLAGS] <directory>       Run analysis on a codebase
+    tukey query [FLAG] <file>       Query a pre-built analysis file
 
-FLAGS:
+FLAGS (analysis):
     -v, --verbose           Show detailed output including function usage report
     -o, --output <file>     Export results to JSON file
     --exclude <dir>         Exclude directory from analysis (can be used multiple times)
     -h, --help              Show this help message
-    -l, --language    	    Specify the programming language to use
+    -l, --language          Specify the programming language to use
     --version               Show version information
+
+QUERY FLAGS:
+    --find <term>           Find nodes whose name contains term (case-insensitive)
+    --callers <name>        Show all nodes that call or reference the named symbol
+    --dependents <name>     Show all nodes that the named symbol depends on
+    --orphans               List all orphaned nodes (dead code candidates)
 
 CONFIGURATION:
     Tukey will automatically load settings from a config file in the project root
@@ -252,6 +318,10 @@ EXAMPLES:
     tukey ./my-project
     tukey -v ./my-project -o analysis.json
     tukey --exclude vendor --exclude tests ./my-project
+    tukey query --find "GatewayFactory" analysis.json
+    tukey query --callers "makeApiRequest" analysis.json
+    tukey query --dependents "PaymentService" analysis.json
+    tukey query --orphans analysis.json
 
 `, version)
 }
