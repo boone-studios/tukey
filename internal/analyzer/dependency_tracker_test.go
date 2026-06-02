@@ -1,8 +1,6 @@
 package analyzer
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/boone-studios/tukey/internal/models"
@@ -57,21 +55,82 @@ func TestBuildDependencyGraph(t *testing.T) {
 	}
 }
 
-func TestExportToJSON(t *testing.T) {
+
+// TestFindTargetNode_MethodCall verifies that a method call recorded in the Go
+// parser's "Namespace\ClassName::method" format is correctly linked to the
+// method node, so the method is not reported as an orphan.
+func TestFindTargetNode_MethodCall(t *testing.T) {
+	file := &models.ParsedFile{
+		Path:      "internal/tracker.go",
+		Namespace: "myapp",
+		Elements: []models.CodeElement{
+			{Type: "method", Name: "helper", Namespace: "myapp", ClassName: "Tracker", Line: 5},
+			{Type: "method", Name: "caller", Namespace: "myapp", ClassName: "Tracker", Line: 10},
+		},
+		Usage: []models.UsageElement{
+			{Type: "method_call", Name: "myapp\\Tracker::helper", Context: "caller", Line: 12},
+		},
+	}
+
 	dt := NewDependencyTracker()
-	graph := dt.BuildDependencyGraph([]*models.ParsedFile{sampleParsedFile()})
-	if graph.TotalNodes == 0 {
-		t.Fatalf("graph not built correctly")
+	graph := dt.BuildDependencyGraph([]*models.ParsedFile{file})
+
+	var helperNode *models.DependencyNode
+	for _, node := range graph.Nodes {
+		if node.Name == "helper" && node.ClassName == "Tracker" {
+			helperNode = node
+			break
+		}
+	}
+	if helperNode == nil {
+		t.Fatal("helper node not found in graph")
+	}
+	if len(helperNode.Dependents) == 0 {
+		t.Error("helper should have dependents (called by caller), got 0")
+	}
+	for _, orphan := range graph.Orphans {
+		if orphan.Name == "helper" {
+			t.Error("helper should not be reported as an orphan")
+		}
+	}
+}
+
+// TestFindTargetNode_FieldAccess verifies that a struct field access recorded in
+// the Go parser's "Namespace\ClassName::field" format is correctly linked to the
+// field node, so it is not reported as an orphan.
+func TestFindTargetNode_FieldAccess(t *testing.T) {
+	file := &models.ParsedFile{
+		Path:      "pkg/report.go",
+		Namespace: "myapp",
+		Elements: []models.CodeElement{
+			{Type: "property", Name: "Total", Namespace: "myapp", ClassName: "Report", Line: 3},
+			{Type: "function", Name: "process", Namespace: "myapp", Line: 8},
+		},
+		Usage: []models.UsageElement{
+			{Type: "property", Name: "myapp\\Report::Total", Context: "process", Line: 10},
+		},
 	}
 
-	tmp := t.TempDir()
-	outPath := filepath.Join(tmp, "graph.json")
-	if err := dt.ExportToJSON(outPath); err != nil {
-		t.Fatalf("ExportToJSON failed: %v", err)
-	}
+	dt := NewDependencyTracker()
+	graph := dt.BuildDependencyGraph([]*models.ParsedFile{file})
 
-	if _, err := os.Stat(outPath); err != nil {
-		t.Fatalf("expected file at %s, got error: %v", outPath, err)
+	var totalNode *models.DependencyNode
+	for _, node := range graph.Nodes {
+		if node.Name == "Total" && node.ClassName == "Report" {
+			totalNode = node
+			break
+		}
+	}
+	if totalNode == nil {
+		t.Fatal("Total node not found in graph")
+	}
+	if len(totalNode.Dependents) == 0 {
+		t.Error("Total should have dependents (accessed by process), got 0")
+	}
+	for _, orphan := range graph.Orphans {
+		if orphan.Name == "Total" {
+			t.Error("Total should not be reported as an orphan")
+		}
 	}
 }
 

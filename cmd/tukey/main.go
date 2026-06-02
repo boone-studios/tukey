@@ -50,6 +50,12 @@ func main() {
 		return
 	}
 
+	// Dispatch agent subcommand.
+	if len(os.Args) > 1 && os.Args[1] == "agent" {
+		runAgent(os.Args[2:])
+		return
+	}
+
 	argv, err := parseArgs()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -442,6 +448,7 @@ USAGE:
     tukey query [FLAG] <file>       Query a pre-built analysis file
     tukey mcp [FLAG] [file]         Start a native Model Context Protocol (MCP) server
     tukey init [FLAGS] [directory]  Initialize tukey configuration in a project
+    tukey agent [FLAGS]             Configure Tukey for use with Claude Code agents
 
 FLAGS (analysis):
     -v, --verbose           Show detailed output including function usage report
@@ -487,6 +494,8 @@ EXAMPLES:
     tukey query --orphans analysis.json
     tukey mcp analysis.json
     tukey init ./my-project
+    tukey agent
+    tukey agent --global
 
 `, version)
 }

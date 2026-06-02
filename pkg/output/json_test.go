@@ -31,18 +31,3 @@ func TestJSONExporter_Export(t *testing.T) {
 	}
 }
 
-func TestJSONExporter_ExportGraph(t *testing.T) {
-	res := makeDummyResult()
-	je := NewJSONExporter()
-
-	tmp := t.TempDir()
-	outPath := filepath.Join(tmp, "graph.json")
-	if err := je.ExportGraph(res.Graph, outPath); err != nil {
-		t.Fatalf("ExportGraph failed: %v", err)
-	}
-
-	data, _ := os.ReadFile(outPath)
-	if !strings.Contains(string(data), `"totalNodes": 1`) {
-		t.Errorf("expected graph JSON to contain totalNodes=1")
-	}
-}

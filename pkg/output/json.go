@@ -45,12 +45,3 @@ func (je *JSONExporter) Export(result *models.AnalysisResult, filename string) e
 	return os.WriteFile(filename, data, 0644)
 }
 
-// ExportGraph exports just the dependency graph to JSON (for backwards compatibility)
-func (je *JSONExporter) ExportGraph(graph *models.DependencyGraph, filename string) error {
-	data, err := json.MarshalIndent(graph, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(filename, data, 0644)
-}

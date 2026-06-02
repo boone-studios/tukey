@@ -4,9 +4,7 @@
 package analyzer
 
 import (
-	"encoding/json"
 	"fmt"
-	"os"
 	"sort"
 	"strings"
 
@@ -245,30 +243,47 @@ func (dt *DependencyTracker) addDependencyRef(source, target *models.DependencyN
 
 // findTargetNode locates a target node by name and context
 func (dt *DependencyTracker) findTargetNode(name, namespace string) string {
-	// For static calls like "Response::create", extract just the class name
+	// For method calls and property access like "pkg\\ClassName::memberName"
 	if strings.Contains(name, "::") {
 		parts := strings.Split(name, "::")
-		className := parts[0]
+		qualifiedClass := parts[0] // may be "pkg\\ClassName" (Go) or short "ClassName" (PHP)
+		memberName := parts[1]
 
-		// Try the exact namespace match first
-		fullName := dt.getFullName(namespace, className)
+		// Extract the namespace embedded in the qualified class name (Go-style).
+		// e.g. "github.com/foo\\MyStruct" → memberNamespace = "github.com/foo"
+		memberNamespace := namespace
+		if idx := strings.LastIndex(qualifiedClass, "\\"); idx >= 0 {
+			memberNamespace = qualifiedClass[:idx]
+		}
+
+		// 1. Try the member node directly (method or property).
+		memberFullName := dt.getFullName(memberNamespace, memberName)
+		if nodeID, exists := dt.nodeIndex[memberFullName]; exists {
+			return nodeID
+		}
+
+		// 2. Try the member in the calling namespace (cross-package call recorded with
+		// a different namespace than the caller's own package).
+		if memberNamespace != namespace {
+			if nodeID, exists := dt.nodeIndex[dt.getFullName(namespace, memberName)]; exists {
+				return nodeID
+			}
+		}
+
+		// 3. Fall back to class-level lookup (PHP static calls like "Response::create").
+		fullName := dt.getFullName(namespace, qualifiedClass)
 		if nodeID, exists := dt.nodeIndex[fullName]; exists {
 			return nodeID
 		}
 
-		// Try to find in the namespace map (for classes in current namespace)
-		if fullName, exists := dt.namespaceMap[className]; exists {
+		if fullName, exists := dt.namespaceMap[qualifiedClass]; exists {
 			if nodeID, exists := dt.nodeIndex[fullName]; exists {
 				return nodeID
 			}
 		}
 
-		// Only match by class name alone if it's unambiguous
-		// (i.e., there's exactly one class with that name in our codebase)
-		if nodeID, exists := dt.nodeIndex[className]; exists {
-			// Verify this is actually the right class by checking if it's in our namespace
+		if nodeID, exists := dt.nodeIndex[qualifiedClass]; exists {
 			if targetNode := dt.graph.Nodes[nodeID]; targetNode != nil {
-				// Only return if it's in our codebase (not external)
 				if targetNode.Namespace != "" || targetNode.File != "" {
 					return nodeID
 				}
@@ -391,21 +406,6 @@ func (dt *DependencyTracker) getFullName(namespace, name string) string {
 		return name
 	}
 	return namespace + "\\" + name
-}
-
-func (dt *DependencyTracker) extractClassNameFromImport(importPath string) string {
-	parts := strings.Split(importPath, "\\")
-	return parts[len(parts)-1]
-}
-
-// ExportToJSON exports the dependency graph to JSON
-func (dt *DependencyTracker) ExportToJSON(filename string) error {
-	data, err := json.MarshalIndent(dt.graph, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	return os.WriteFile(filename, data, 0644)
 }
 
 // PrintSummary displays a human-readable summary of the dependency graph
@@ -677,20 +677,3 @@ func (dt *DependencyTracker) PrintFunctionUsageReport() {
 	fmt.Println(strings.Repeat("=", 70))
 }
 
-// Helper function to get usage elements from stored usage data
-func (dt *DependencyTracker) getNodeUsage(node *models.DependencyNode) []models.UsageElement {
-	var usages []models.UsageElement
-
-	// Find all usage elements that originate from this node's file
-	for _, usage := range dt.allUsage {
-		// Check if this usage comes from the same file and context as the node
-		if usage.Context == node.Name ||
-			(node.Type == "class" && usage.Context == node.Name) {
-			// Additional check: we need to match the file somehow
-			// Since we don't store file in UsageElement, we'll work with what we have
-			usages = append(usages, usage)
-		}
-	}
-
-	return usages
-}
