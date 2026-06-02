@@ -98,7 +98,7 @@ timeline
 ### 🌐 Phase 5: Polyglot Mapping & Hybrid Runtime Traces
 *Expand Tukey beyond single-language static rules to address full-stack, dynamic, modern web apps.*
 
-- [ ] **Multi-Language Parser Expansion (Go, TypeScript)**
+- [x] **Multi-Language Parser Expansion (Go, TypeScript)**
   - **Description:** Add new `LanguageParser` implementations for TypeScript/JavaScript and Go to map polyglot codebases.
   - **Complexity:** High
 - [ ] **Full-Stack Boundary Bridging**

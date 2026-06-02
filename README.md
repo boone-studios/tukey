@@ -4,7 +4,7 @@ A high-performance static analysis tool that maps code dependencies, highlights 
 large projects. Designed to be **language-agnostic**, the engine can analyze code architecture and usage patterns in any
 language.
 
-The initial release focuses on **PHP support**, with additional languages planned for the future.
+Currently supports **PHP**, **JavaScript**, and **Go**.
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/boone-studios/tukey)](https://goreportcard.com/report/github.com/boone-studios/tukey)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -43,25 +43,25 @@ Download the latest release from the [releases page](https://github.com/boone-st
 
 ```bash
 # Basic analysis
-tukey /path/to/your/php/project
+tukey /path/to/your/project
 
 # Verbose output with function usage report
-tukey -v /path/to/your/php/project
+tukey -v /path/to/your/project
 
 # Benchmark mode (quiet execution with performance and resource profiling)
-tukey -b /path/to/your/php/project
+tukey -b /path/to/your/project
 
 # Compare current graph against baseline (structural diff and regression auditing)
-tukey --compare baseline.json /path/to/your/php/project
+tukey --compare baseline.json /path/to/your/project
 
 # Enforce boundaries strictly (exits with non-zero code if architectural violations exist)
-tukey --compare baseline.json --strict /path/to/your/php/project
+tukey --compare baseline.json --strict /path/to/your/project
 
 # Export results to JSON
-tukey -v --output analysis.json /path/to/your/php/project
+tukey -v --output analysis.json /path/to/your/project
 
 # Exclude directories
-tukey --exclude vendor --exclude tests /path/to/your/php/project
+tukey --exclude vendor --exclude tests /path/to/your/project
 
 # Start a native Model Context Protocol (MCP) server for AI agents
 tukey mcp analysis.json
@@ -162,7 +162,7 @@ You can also feed Tukey's compact query capabilities directly to LLMs as a CLI s
 ## Use Cases
 
 ### Legacy Code Understanding
-Perfect for analyzing inherited PHP codebases with little documentation:
+Perfect for analyzing inherited codebases with little documentation:
 
 ```bash
 tukey -v ./legacy-project
@@ -234,7 +234,7 @@ Identify refactoring opportunities:
 
 | Tool                   | Language Focus                   | Primary Purpose                                | Output Style                 | Complexity/Dependency Metrics   | Multi-language     | CI/CD Friendly      | Footprint                     |
 | ---------------------- | -------------------------------- | ---------------------------------------------- | ---------------------------- | --------------------------------|--------------------| ------------------- | ----------------------------- |
-| **Tukey**              | PHP first (pluggable for others) | **Maps dependencies, complexity, and orphans** | Console summary, JSON export | ✅ Yes (graph, hotspots, orphans) | 🌍 Designed for it | ✅ Simple JSON + CLI | ⚡ Lightweight (single binary) |
+| **Tukey**              | PHP, JavaScript, Go             | **Maps dependencies, complexity, and orphans** | Console summary, JSON export | ✅ Yes (graph, hotspots, orphans) | 🌍 Designed for it | ✅ Simple JSON + CLI | ⚡ Lightweight (single binary) |
 | PHPStan                | PHP                              | Type safety, strict type checking              | CLI, IDE integration         | ❌ No                            | ❌ No               | ✅ Yes               | ⚖️ Medium (lots of rules)     |
 | Psalm                  | PHP                              | Type checking + code correctness               | CLI, IDE integration         | ❌ No                            | ❌ No               | ✅ Yes               | ⚖️ Medium                     |
 | PDepend                | PHP                              | Code metrics, class dependencies               | XML, charts, reports         | ✅ Yes (metrics & graphs)        | ❌ No               | ⚠️ Limited          | 🐘 Heavier (XML reports)      |
@@ -248,7 +248,7 @@ Identify refactoring opportunities:
 
 * **Tukey is not a linter**: it doesn’t enforce style or types. Instead, it **draws the map** of your system.
 * **Output is lightweight**: JSON + console means you can plug it into CI pipelines or explore locally without dashboards.
-* **Language-agnostic design**: while starting with PHP, the parser interface makes adding new languages straightforward.
+* **Language-agnostic design**: support for PHP, JavaScript, and Go, with an interface that makes adding new languages straightforward.
 * **Zero infrastructure**: unlike SonarQube, Tukey is just a single binary — no servers, no databases.
 
 For an in-depth, philosophical and technical analysis of how Tukey compares to enterprise quality gates, see the [SonarQube Comparison Guide](docs/sonarqube_comparison.md).
@@ -306,11 +306,11 @@ Quick summary of upcoming targets:
 - [ ] Version Control (Git) Integration (complexity vs. churn and blast radius analysis)
 - [x] Architectural boundary enforcement & layer guardrails (`--strict` and configs)
 - [x] AI Agent MCP micro-graph context pruning (`tukey_get_localized_context`)
-- [ ] Polyglot analysis (TypeScript/Go) & dynamic execution traces
+- [x] Polyglot analysis (PHP, JavaScript, Go)
 - [ ] Web dashboard for interactive dependency visualization
 - [ ] Integration with popular IDEs
 
 ## Acknowledgments
 
-- Inspired by the need to understand complex legacy PHP codebases
+- Inspired by the need to understand complex legacy codebases
 - Built with Go for performance and cross-platform compatibility
