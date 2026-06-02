@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"golang.org/x/term"
@@ -468,11 +467,11 @@ func promptRadio(options []RadioOption) (int, error) {
 		}
 
 		if n == 1 && buf[0] == 27 {
-			syscall.SetNonblock(fd, true)
+			setNonblock(fd, true)
 			time.Sleep(10 * time.Millisecond)
 			extraBuf := make([]byte, 10)
 			nExtra, errExtra := os.Stdin.Read(extraBuf)
-			syscall.SetNonblock(fd, false)
+			setNonblock(fd, false)
 			if errExtra == nil && nExtra >= 2 {
 				buf[1] = extraBuf[0]
 				buf[2] = extraBuf[1]

@@ -11,7 +11,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/boone-studios/tukey/internal/parser"
@@ -374,11 +373,11 @@ func promptCheckboxes(options []CheckboxOption) ([]string, error) {
 		// Handle split reads of Escape sequences:
 		// If we only read 1 byte and it's Escape (27), check if more bytes are coming immediately.
 		if n == 1 && buf[0] == 27 {
-			syscall.SetNonblock(fd, true)
+			setNonblock(fd, true)
 			time.Sleep(10 * time.Millisecond)
 			extraBuf := make([]byte, 10)
 			nExtra, errExtra := os.Stdin.Read(extraBuf)
-			syscall.SetNonblock(fd, false)
+			setNonblock(fd, false)
 
 			if errExtra == nil && nExtra >= 2 {
 				buf[1] = extraBuf[0]
