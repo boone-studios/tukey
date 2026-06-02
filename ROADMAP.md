@@ -24,7 +24,7 @@ timeline
 ### 🛑 Phase 1: Deep Static & Refactoring Intelligence
 *Strengthen the core static analysis engine with deeper metrics and refactoring helpers.*
 
-- [ ] **Circular Dependency Detection**
+- [x] **Circular Dependency Detection**
   - **Description:** Implement Tarjan's or Johnson's algorithm to trace dependency cycles (e.g., $A \to B \to C \to A$) in the dependency graph.
   - **Complexity:** Medium
   - **Proposed Implementation:** Add a `pkg/analyzer/cycles.go` file to analyze the resolved `DependencyGraph`.
@@ -61,7 +61,7 @@ timeline
 ### 🛡️ Phase 3: Architectural Layer & Boundary Guardrails
 *Prevent architectural drift and enforce clean architecture rules programmatically.*
 
-- [ ] **Boundary Rules Engine (`tukey check`)**
+- [x] **Boundary Rules Engine (`tukey check`)**
   - **Description:** Define a structured configuration schema in `.tukey.yml` allowing developers to declare layer boundaries (e.g., Domain, Application, Infrastructure) and assert dependency rules.
   - **Complexity:** Medium
   - **Proposed Implementation:** Extend `internal/config` to parse boundary rules, and add `pkg/guard/guardrails.go` to assert these rules against the generated `DependencyGraph`.
@@ -76,7 +76,7 @@ timeline
       rules:
         - Domain cannot_depend_on [Infrastructure]
     ```
-- [ ] **CI/CD Integration and Exit Codes**
+- [x] **CI/CD Integration and Exit Codes**
   - **Description:** Implement a strict mode for CI systems. Tukey will exit with non-zero exit codes if circular dependencies, boundary violations, or new orphaned elements are introduced.
   - **Complexity:** Low
 
@@ -85,7 +85,7 @@ timeline
 ### 🤖 Phase 4: AI Agent Context Pruning & Tooling
 *Optimize Tukey as a machine-readable brain for agentic AI workflows (e.g., Gemini, Claude, Cursor).*
 
-- [ ] **MCP Micro-Graph Tool (`tukey_get_localized_context`)**
+- [x] **MCP Micro-Graph Tool (`tukey_get_localized_context`)**
   - **Description:** Add an MCP tool that accepts a target symbol (e.g., `OrderController::checkout`) and returns a minimized sub-graph containing only immediate dependencies/dependents within $N$ steps. This prevents stuffing entire codebases into LLM context windows.
   - **Complexity:** Low
   - **Proposed Implementation:** Add a query method in `pkg/query/query.go` and expose it as a tool in the MCP server.

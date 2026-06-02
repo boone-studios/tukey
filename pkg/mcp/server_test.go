@@ -200,8 +200,8 @@ func TestMCPServer_ToolsList(t *testing.T) {
 		t.Fatalf("tools is not a slice: %T", resultMap["tools"])
 	}
 
-	if len(tools) != 4 {
-		t.Errorf("expected 4 tools, got %d", len(tools))
+	if len(tools) != 5 {
+		t.Errorf("expected 5 tools, got %d", len(tools))
 	}
 }
 
@@ -237,6 +237,11 @@ func TestMCPServer_ToolCalls(t *testing.T) {
 			name:       "Find Orphans",
 			request:    `{"jsonrpc":"2.0","method":"tools/call","id":14,"params":{"name":"tukey_find_orphans","arguments":{}}}` + "\n",
 			wantResult: `"deadHelper"`,
+		},
+		{
+			name:       "Get Localized Context",
+			request:    `{"jsonrpc":"2.0","method":"tools/call","id":15,"params":{"name":"tukey_get_localized_context","arguments":{"symbol":"GatewayFactory","depth":1}}}` + "\n",
+			wantResult: `"HttpClient"`,
 		},
 	}
 

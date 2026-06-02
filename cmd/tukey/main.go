@@ -18,6 +18,7 @@ import (
 	"github.com/boone-studios/tukey/internal/progress"
 	"github.com/boone-studios/tukey/internal/scanner"
 	"github.com/boone-studios/tukey/pkg/compare"
+	"github.com/boone-studios/tukey/pkg/guard"
 	"github.com/boone-studios/tukey/pkg/output"
 	"github.com/boone-studios/tukey/pkg/query"
 
@@ -215,6 +216,9 @@ func main() {
 	processingTime := time.Since(parseStart) // Original Tukey timed from parse start to graph end
 	totalTime := time.Since(scanStart)
 
+	// Find circular dependencies (cycles)
+	cycles := analyzer.FindCycles(graph)
+
 	// Create result object
 	result := &models.AnalysisResult{
 		Graph:          graph,
@@ -222,6 +226,7 @@ func main() {
 		TotalFiles:     len(files),
 		TotalElements:  getTotalElements(parsedFiles),
 		ProcessingTime: processingTime.String(),
+		Cycles:         cycles,
 	}
 
 	// Step 4: Display results
@@ -239,6 +244,15 @@ func main() {
 		}
 		comparisonReport := compare.CompareGraphs(baselineEngine.Graph(), graph)
 		compare.PrintComparisonReport(comparisonReport, len(graph.Orphans))
+	}
+
+	// Run architectural boundary guardrails check if configured
+	var violations []guard.Violation
+	if len(fileCfg.Architecture.Layers) > 0 {
+		violations = guard.ValidateBoundaries(graph, fileCfg.Architecture)
+		if !argv.Benchmark {
+			guard.PrintViolations(violations)
+		}
 	}
 
 	// Step 5: Export if requested
@@ -311,6 +325,12 @@ func main() {
 		fmt.Printf("\n🎉 Analysis complete! Processed %d files with %d dependencies\n",
 			len(files), graph.TotalEdges)
 	}
+
+	// Exit with error code if strict mode is enabled and violations exist
+	if len(violations) > 0 && argv.Strict {
+		fmt.Fprintf(os.Stderr, "❌ Strict mode: exiting due to %d architectural boundary violation(s)\n", len(violations))
+		os.Exit(2)
+	}
 }
 
 // Config holds application configuration
@@ -320,6 +340,7 @@ type Config struct {
 	Verbose     bool
 	Benchmark   bool
 	ComparePath string
+	Strict      bool
 	ShowHelp    bool
 	ShowVersion bool
 	ExcludeDirs []string
@@ -347,6 +368,8 @@ func parseArgs() (*Config, error) {
 			argv.Verbose = true
 		case "-b", "--benchmark":
 			argv.Benchmark = true
+		case "-s", "--strict":
+			argv.Strict = true
 		case "-c", "--compare":
 			if i+1 >= len(args) {
 				return nil, fmt.Errorf("--compare requires a baseline JSON file")
@@ -416,6 +439,7 @@ FLAGS (analysis):
     -v, --verbose           Show detailed output including function usage report
     -b, --benchmark         Run in benchmark mode (disables spinners and prints detailed performance metrics)
     -c, --compare <file>    Compare current codebase with a baseline JSON analysis file (regression detection)
+    -s, --strict            Strict mode (exits with non-zero status if architectural violations are found)
     -o, --output <file>     Export results to JSON file
     --exclude <dir>         Exclude directory from analysis (can be used multiple times)
     -h, --help              Show this help message
@@ -446,6 +470,7 @@ EXAMPLES:
     tukey ./my-project
     tukey -b ./my-project
     tukey --compare baseline.json ./my-project
+    tukey --strict ./my-project
     tukey -v ./my-project -o analysis.json
     tukey --exclude vendor --exclude tests ./my-project
     tukey query --find "GatewayFactory" analysis.json

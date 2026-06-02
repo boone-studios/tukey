@@ -250,3 +250,118 @@ func coalesce(results []NodeResult) []NodeResult {
 	}
 	return results
 }
+
+// LocalizedContextResult holds the categorized target, dependency, and dependent nodes for a symbol
+type LocalizedContextResult struct {
+	Symbol       string       `json:"symbol"`
+	TargetNodes  []NodeResult `json:"targets"`
+	Dependencies []NodeResult `json:"dependencies"`
+	Dependents   []NodeResult `json:"dependents"`
+}
+
+// LocalizedContext finds dependencies and dependents up to a certain depth around a symbol
+func (e *Engine) LocalizedContext(term string, maxDepth int) LocalizedContextResult {
+	if maxDepth < 1 {
+		maxDepth = 1
+	}
+
+	targets := e.findNodes(term)
+	res := LocalizedContextResult{
+		Symbol:       term,
+		TargetNodes:  []NodeResult{},
+		Dependencies: []NodeResult{},
+		Dependents:   []NodeResult{},
+	}
+
+	if len(targets) == 0 {
+		return res
+	}
+
+	// Keep track of target IDs
+	targetIDs := make(map[string]bool)
+	for _, target := range targets {
+		targetIDs[target.ID] = true
+		res.TargetNodes = append(res.TargetNodes, nodeToResult(target))
+	}
+
+	// BFS for Dependencies (outgoing edges)
+	seenDeps := make(map[string]bool)
+	type queueItem struct {
+		node  *models.DependencyNode
+		depth int
+	}
+
+	var depQueue []queueItem
+	for _, target := range targets {
+		depQueue = append(depQueue, queueItem{node: target, depth: 0})
+	}
+
+	for len(depQueue) > 0 {
+		current := depQueue[0]
+		depQueue = depQueue[1:]
+
+		if current.depth >= maxDepth {
+			continue
+		}
+
+		for _, ref := range current.node.Dependencies {
+			if targetIDs[ref.TargetID] || seenDeps[ref.TargetID] {
+				continue
+			}
+			seenDeps[ref.TargetID] = true
+			depNode := e.graph.Nodes[ref.TargetID]
+			if depNode == nil {
+				continue
+			}
+
+			r := nodeToResult(depNode)
+			r.RefType = ref.Type
+			r.RefLines = ref.Lines
+			r.RefCount = ref.Count
+			res.Dependencies = append(res.Dependencies, r)
+
+			depQueue = append(depQueue, queueItem{node: depNode, depth: current.depth + 1})
+		}
+	}
+
+	// BFS for Dependents (incoming edges)
+	seenCaller := make(map[string]bool)
+	var callerQueue []queueItem
+	for _, target := range targets {
+		callerQueue = append(callerQueue, queueItem{node: target, depth: 0})
+	}
+
+	for len(callerQueue) > 0 {
+		current := callerQueue[0]
+		callerQueue = callerQueue[1:]
+
+		if current.depth >= maxDepth {
+			continue
+		}
+
+		for _, ref := range current.node.Dependents {
+			if targetIDs[ref.TargetID] || seenCaller[ref.TargetID] {
+				continue
+			}
+			seenCaller[ref.TargetID] = true
+			callerNode := e.graph.Nodes[ref.TargetID]
+			if callerNode == nil {
+				continue
+			}
+
+			r := nodeToResult(callerNode)
+			r.RefType = ref.Type
+			r.RefLines = ref.Lines
+			r.RefCount = ref.Count
+			res.Dependents = append(res.Dependents, r)
+
+			callerQueue = append(callerQueue, queueItem{node: callerNode, depth: current.depth + 1})
+		}
+	}
+
+	sortResults(res.TargetNodes)
+	sortResults(res.Dependencies)
+	sortResults(res.Dependents)
+
+	return res
+}

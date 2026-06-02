@@ -150,6 +150,24 @@ func (cf *ConsoleFormatter) PrintSummary(result *models.AnalysisResult, verbose 
 		}
 	}
 
+	if len(result.Cycles) > 0 {
+		fmt.Printf("\n🔄 Circular Dependencies Detected (%d total):\n", len(result.Cycles))
+		fmt.Printf("   ⚠️  Looping dependencies can cause tight coupling and testing bottlenecks. Consider refactoring:\n")
+		for _, cycle := range result.Cycles {
+			var path []string
+			for _, nodeID := range cycle {
+				// Clean the node ID for readable output
+				parts := strings.Split(nodeID, ":")
+				if len(parts) >= 2 {
+					path = append(path, fmt.Sprintf("%s (%s)", parts[1], parts[0]))
+				} else {
+					path = append(path, nodeID)
+				}
+			}
+			fmt.Printf("   • %s\n", strings.Join(path, " → "))
+		}
+	}
+
 	fmt.Println(strings.Repeat("=", 70))
 
 	// Add a function usage report in verbose mode

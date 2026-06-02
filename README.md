@@ -48,6 +48,15 @@ tukey /path/to/your/php/project
 # Verbose output with function usage report
 tukey -v /path/to/your/php/project
 
+# Benchmark mode (quiet execution with performance and resource profiling)
+tukey -b /path/to/your/php/project
+
+# Compare current graph against baseline (structural diff and regression auditing)
+tukey --compare baseline.json /path/to/your/php/project
+
+# Enforce boundaries strictly (exits with non-zero code if architectural violations exist)
+tukey --compare baseline.json --strict /path/to/your/php/project
+
 # Export results to JSON
 tukey -v --output analysis.json /path/to/your/php/project
 
@@ -69,6 +78,21 @@ verbose: true
 excludeDirs:
   - bootstrap
   - public
+
+# Configure architectural boundary guardrails
+architecture:
+  layers:
+    - name: Domain
+      path: app/Domain
+    - name: Application
+      path: app/Services
+    - name: Infrastructure
+      path: app/Infrastructure
+  rules:
+    - from: Domain
+      cannot_depend_on: [Application, Infrastructure]
+    - from: Application
+      cannot_depend_on: [Infrastructure]
 ```
 
 If you prefer JSON, you can use a `.tukey.json` file instead.
@@ -81,7 +105,18 @@ If you prefer JSON, you can use a `.tukey.json` file instead.
   "excludeDirs": [
     "bootstrap",
     "public"
-  ]
+  ],
+  "architecture": {
+    "layers": [
+      { "name": "Domain", "path": "app/Domain" },
+      { "name": "Application", "path": "app/Services" },
+      { "name": "Infrastructure", "path": "app/Infrastructure" }
+    ],
+    "rules": [
+      { "from": "Domain", "cannot_depend_on": ["Application", "Infrastructure"] },
+      { "from": "Application", "cannot_depend_on": ["Infrastructure"] }
+    ]
+  }
 }
 ```
 
@@ -115,13 +150,14 @@ To configure the server in your MCP host (like `mcpSettings.json`), add:
 ```
 
 Exposed MCP Tools:
-- `tukey_find_symbol` — Locate classes, methods, and functions.
-- `tukey_get_callers` — Trace what calls/references a symbol.
-- `tukey_get_dependents` — Trace what a symbol depends on.
+- `tukey_find_symbol` (args: `term` string) — Locate classes, methods, and functions.
+- `tukey_get_callers` (args: `symbol` string) — Trace what calls/references a symbol.
+- `tukey_get_dependents` (args: `symbol` string) — Trace what a symbol depends on.
 - `tukey_find_orphans` — Identify candidate dead or orphaned code.
+- `tukey_get_localized_context` (args: `symbol` string, `depth` int [optional]) — Retrieve a pruned context sub-graph (containing targets, dependencies, and dependents) around a symbol (ideal for AI context pruning).
 
 ### 2. Tukey Command Line Skill
-You can also feed Tukey's compact query capabilities directly to LLMs as a CLI skill. For a detailed guide on CLI-based agent configurations, see [docs/tukey_skill.md](docs/tukey_skill.md).
+You can also feed Tukey's compact query capabilities directly to LLMs as a CLI skill. For a detailed guide on CLI-based agent configurations, including circular dependency audits, performance benchmarking, and architectural layer checks, see [docs/tukey_skill.md](docs/tukey_skill.md).
 
 ## Use Cases
 
@@ -266,10 +302,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 For an in-depth, multi-phase breakdown of Tukey's long-term vision, proposed implementation details, and tracking, see the [Development Roadmap](ROADMAP.md).
 
 Quick summary of upcoming targets:
-- [ ] Circular dependency detection & cycles analysis
+- [x] Circular dependency detection & cycles analysis
 - [ ] Version Control (Git) Integration (complexity vs. churn and blast radius analysis)
-- [ ] Architectural boundary enforcement & layer guardrails (`tukey check`)
-- [ ] AI Agent MCP micro-graph context pruning
+- [x] Architectural boundary enforcement & layer guardrails (`--strict` and configs)
+- [x] AI Agent MCP micro-graph context pruning (`tukey_get_localized_context`)
 - [ ] Polyglot analysis (TypeScript/Go) & dynamic execution traces
 - [ ] Web dashboard for interactive dependency visualization
 - [ ] Integration with popular IDEs

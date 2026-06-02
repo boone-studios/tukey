@@ -9,13 +9,29 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+type LayerConfig struct {
+	Name string `json:"name" yaml:"name"`
+	Path string `json:"path" yaml:"path"`
+}
+
+type RuleConfig struct {
+	From           string   `json:"from" yaml:"from"`
+	CannotDependOn []string `json:"cannot_depend_on" yaml:"cannot_depend_on"`
+}
+
+type ArchitectureConfig struct {
+	Layers []LayerConfig `json:"layers" yaml:"layers"`
+	Rules  []RuleConfig  `json:"rules" yaml:"rules"`
+}
+
 type FileConfig struct {
-	Language    string   `json:"language" yaml:"language"`
-	ExcludeDirs []string `json:"excludeDirs" yaml:"excludeDirs"`
-	OutputFile  string   `json:"outputFile" yaml:"outputFile"`
-	Verbose     bool     `json:"verbose" yaml:"verbose"`
-	Benchmark   bool     `json:"benchmark" yaml:"benchmark"`
-	ComparePath string   `json:"comparePath" yaml:"comparePath"`
+	Language     string             `json:"language" yaml:"language"`
+	ExcludeDirs  []string           `json:"excludeDirs" yaml:"excludeDirs"`
+	OutputFile   string             `json:"outputFile" yaml:"outputFile"`
+	Verbose      bool               `json:"verbose" yaml:"verbose"`
+	Benchmark    bool               `json:"benchmark" yaml:"benchmark"`
+	ComparePath  string             `json:"comparePath" yaml:"comparePath"`
+	Architecture ArchitectureConfig `json:"architecture" yaml:"architecture"`
 }
 
 func LoadConfig(projectRoot string) (*FileConfig, error) {

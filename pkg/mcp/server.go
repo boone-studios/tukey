@@ -195,6 +195,24 @@ func (s *Server) dispatch(method string, params json.RawMessage) (interface{}, *
 						Type: "object",
 					},
 				},
+				{
+					Name:        "tukey_get_localized_context",
+					Description: "Get a minimized localized context graph around a target symbol, returning its direct dependencies and dependents up to a specified depth limit.",
+					InputSchema: InputSchema{
+						Type: "object",
+						Properties: map[string]Property{
+							"symbol": {
+								Type:        "string",
+								Description: "The name, namespaced name, or exact ID of the target symbol.",
+							},
+							"depth": {
+								Type:        "integer",
+								Description: "The maximum depth of traversal (defaults to 1).",
+							},
+						},
+						Required: []string{"symbol"},
+					},
+				},
 			},
 		}, nil
 
@@ -287,6 +305,30 @@ func (s *Server) handleToolCall(name string, args json.RawMessage) (string, bool
 
 	case "tukey_find_orphans":
 		result := s.engine.Orphans()
+		data, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return fmt.Sprintf("Error encoding result: %v", err), true
+		}
+		return string(data), false
+
+	case "tukey_get_localized_context":
+		var arguments struct {
+			Symbol string `json:"symbol"`
+			Depth  *int   `json:"depth"`
+		}
+		if err := json.Unmarshal(args, &arguments); err != nil {
+			return "Error: failed to parse arguments: missing 'symbol' string.", true
+		}
+		if arguments.Symbol == "" {
+			return "Error: 'symbol' argument must be a non-empty string.", true
+		}
+
+		depth := 1
+		if arguments.Depth != nil {
+			depth = *arguments.Depth
+		}
+
+		result := s.engine.LocalizedContext(arguments.Symbol, depth)
 		data, err := json.MarshalIndent(result, "", "  ")
 		if err != nil {
 			return fmt.Sprintf("Error encoding result: %v", err), true

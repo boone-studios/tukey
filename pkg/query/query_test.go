@@ -374,6 +374,29 @@ func TestQuery_ResilientMatching(t *testing.T) {
 	})
 }
 
+func TestLocalizedContext(t *testing.T) {
+	e := buildTestEngine()
+
+	// Test getting context for GatewayFactory
+	t.Run("GatewayFactory Context", func(t *testing.T) {
+		res := e.LocalizedContext("GatewayFactory", 1)
+
+		if len(res.TargetNodes) != 1 || res.TargetNodes[0].Name != "GatewayFactory" {
+			t.Errorf("expected 1 target GatewayFactory, got %v", res.TargetNodes)
+		}
+
+		// GatewayFactory depends on HttpClient (outgoing)
+		if len(res.Dependencies) != 1 || res.Dependencies[0].Name != "HttpClient" {
+			t.Errorf("expected 1 dependency HttpClient, got %v", res.Dependencies)
+		}
+
+		// PaymentService depends on GatewayFactory (incoming)
+		if len(res.Dependents) != 1 || res.Dependents[0].Name != "PaymentService" {
+			t.Errorf("expected 1 dependent PaymentService, got %v", res.Dependents)
+		}
+	})
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsStr(s, substr))
 }
