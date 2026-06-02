@@ -25,8 +25,8 @@ type agentConfig struct {
 type agentConfigFormat string
 
 const (
-	agentConfigJSON      agentConfigFormat = "json"
-	agentConfigCodexTOML agentConfigFormat = "codex-toml"
+	agentConfigJSON agentConfigFormat = "json"
+	agentConfigTOML agentConfigFormat = "toml"
 )
 
 // AgentInfo holds metadata and configuration directory paths for a target agent.
@@ -84,7 +84,7 @@ var supportedAgents = []AgentInfo{
 		GlobalDir:      ".codex",
 		ProjectDir:     ".codex",
 		SettingsFile:   "config.toml",
-		ConfigFormat:   agentConfigCodexTOML,
+		ConfigFormat:   agentConfigTOML,
 		NeedsSkillFile: true,
 		SkillFile:      filepath.Join("skills", "tukey", "SKILL.md"),
 	},
@@ -96,6 +96,18 @@ var supportedAgents = []AgentInfo{
 		ProjectDir:     ".cursor",
 		SettingsFile:   "mcp.json",
 		ConfigFormat:   agentConfigJSON,
+		NeedsSkillFile: true,
+		SkillFile:      filepath.Join("skills", "tukey", "SKILL.md"),
+	},
+	{
+		Name:           "Grok",
+		Key:            "grok",
+		Aliases:        []string{"xai"},
+		Description:    "Configure for Grok (.grok/config.toml)",
+		GlobalDir:      ".grok",
+		ProjectDir:     ".grok",
+		SettingsFile:   "config.toml",
+		ConfigFormat:   agentConfigTOML,
 		NeedsSkillFile: true,
 		SkillFile:      filepath.Join("skills", "tukey", "SKILL.md"),
 	},
@@ -320,8 +332,8 @@ func mergeAgentMCPConfig(agent AgentInfo, settingsPath, execPath, analysisFile s
 	switch agent.ConfigFormat {
 	case "", agentConfigJSON:
 		return mergeJSONMCPConfig(settingsPath, execPath, analysisFile)
-	case agentConfigCodexTOML:
-		return mergeCodexTOMLConfig(settingsPath, execPath, analysisFile)
+	case agentConfigTOML:
+		return mergeTOMLConfig(settingsPath, execPath, analysisFile)
 	default:
 		return fmt.Errorf("unsupported config format %q", agent.ConfigFormat)
 	}
@@ -358,8 +370,9 @@ func mergeJSONMCPConfig(settingsPath, execPath, analysisFile string) error {
 	return os.WriteFile(settingsPath, data, 0644)
 }
 
-// mergeCodexTOMLConfig updates Codex's config.toml with a stdio MCP server entry.
-func mergeCodexTOMLConfig(settingsPath, execPath, analysisFile string) error {
+// mergeTOMLConfig updates a TOML-based MCP config (e.g. Codex .codex/config.toml or Grok .grok/config.toml)
+// with a stdio MCP server entry for tukey.
+func mergeTOMLConfig(settingsPath, execPath, analysisFile string) error {
 	var content string
 	if data, err := os.ReadFile(settingsPath); err == nil {
 		content = string(data)
@@ -558,9 +571,11 @@ FLAGS:
 EXAMPLES:
     tukey agent
     tukey agent --agent antigravity
+    tukey agent --agent grok
     tukey agent --global
     tukey agent --agent antigravity --yes
     tukey agent --agent codex
+    tukey agent --agent cursor
 `, strings.Join(names, ", "), supportedAgents[0].Key, supportedAgents[0].Name)
 }
 

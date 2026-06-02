@@ -122,7 +122,7 @@ If you prefer JSON, you can use a `.tukey.json` file instead.
 
 ## AI Agent Integration (Tukey Skill & MCP Server)
 
-Tukey is natively designed to act as a **machine-readable codebase map for AI agents** (like Codex, Gemini, Claude, Cursor, and other agentic coding assistants). If you are using AI agents to explore or edit your codebase, Tukey offers two integration pathways:
+Tukey is natively designed to act as a **machine-readable codebase map for AI agents** (like Codex, Gemini, Claude, Cursor, Grok, and other agentic coding assistants). If you are using AI agents to explore or edit your codebase, Tukey offers two integration pathways:
 
 To install Tukey's MCP server configuration and skill file for a supported agent, use:
 
@@ -131,12 +131,13 @@ tukey agent --agent codex
 tukey agent --agent claude
 tukey agent --agent antigravity
 tukey agent --agent cursor
+tukey agent --agent grok
 ```
 
 Add `--global` to install into the agent's global settings instead of the current project.
 
 ### 1. Native Model Context Protocol (MCP) Server
-Tukey features a built-in MCP server that communicates via JSON-RPC 2.0 over standard I/O (stdin/stdout). This allows compatible tools (e.g., Claude Desktop, Cursor, Zed) to invoke Tukey tools directly within the agent's tool-use loop without shell execution permissions or subprocess spawning overhead.
+Tukey features a built-in MCP server that communicates via JSON-RPC 2.0 over standard I/O (stdin/stdout). This allows compatible tools (e.g., Claude Code, Cursor, Grok, Zed) to invoke Tukey tools directly within the agent's tool-use loop without shell execution permissions or subprocess spawning overhead.
 
 #### Quick Start (MCP)
 1. **Analyze your codebase** to generate the graph file:

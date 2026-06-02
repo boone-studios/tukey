@@ -387,6 +387,10 @@ func TestParseAgentArgs(t *testing.T) {
 			want: &agentConfig{agent: "cursor"},
 		},
 		{
+			args: []string{"--agent", "grok"},
+			want: &agentConfig{agent: "grok"},
+		},
+		{
 			args:    []string{"--agent"},
 			wantErr: true,
 		},
@@ -420,8 +424,8 @@ func TestFindAgent_CodexAliases(t *testing.T) {
 		if agent.Key != "codex" {
 			t.Fatalf("findAgent(%q) = %q, want codex", key, agent.Key)
 		}
-		if agent.ConfigFormat != agentConfigCodexTOML {
-			t.Fatalf("Codex config format = %q, want %q", agent.ConfigFormat, agentConfigCodexTOML)
+		if agent.ConfigFormat != agentConfigTOML {
+			t.Fatalf("Codex config format = %q, want %q", agent.ConfigFormat, agentConfigTOML)
 		}
 		if agent.SkillFile != "skills/tukey/SKILL.md" {
 			t.Fatalf("Codex skill file = %q, want skills/tukey/SKILL.md", agent.SkillFile)
@@ -442,6 +446,24 @@ func TestFindAgent_Cursor(t *testing.T) {
 	}
 	if agent.SkillFile != "skills/tukey/SKILL.md" {
 		t.Fatalf("Cursor skill file = %q, want skills/tukey/SKILL.md", agent.SkillFile)
+	}
+}
+
+func TestFindAgent_Grok(t *testing.T) {
+	for _, key := range []string{"grok", "GROK", "xai"} {
+		agent, ok := findAgent(key)
+		if !ok {
+			t.Fatalf("findAgent(%q) did not find Grok", key)
+		}
+		if agent.Key != "grok" {
+			t.Fatalf("findAgent(%q) = %q, want grok", key, agent.Key)
+		}
+		if agent.ConfigFormat != agentConfigTOML {
+			t.Fatalf("Grok config format = %q, want %q", agent.ConfigFormat, agentConfigTOML)
+		}
+		if agent.SkillFile != "skills/tukey/SKILL.md" {
+			t.Fatalf("Grok skill file = %q, want skills/tukey/SKILL.md", agent.SkillFile)
+		}
 	}
 }
 
@@ -494,7 +516,7 @@ func TestMergeJSONMCPConfig(t *testing.T) {
 	}
 }
 
-func TestMergeCodexTOMLConfig(t *testing.T) {
+func TestMergeTOMLConfig(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/config.toml"
 	existing := `[projects."/tmp/project"]
@@ -543,5 +565,38 @@ enabled = true
 	}
 	if strings.Count(got, "[mcp_servers.tukey]") != 1 {
 		t.Fatalf("merged config should contain one tukey block:\n%s", got)
+	}
+
+	// Verify Grok (also TOML format) merges correctly into a .grok/config.toml style file.
+	grokAgent, ok := findAgent("grok")
+	if !ok {
+		t.Fatal("Grok agent not registered")
+	}
+	grokPath := dir + "/grok-config.toml"
+	if err := os.WriteFile(grokPath, []byte("[ui]\nmax_thoughts_width = 120\n"), 0644); err != nil {
+		t.Fatalf("failed to write grok config: %v", err)
+	}
+	if err := mergeAgentMCPConfig(grokAgent, grokPath, "/usr/local/bin/tukey", "/tmp/project/grok-results.json"); err != nil {
+		t.Fatalf("mergeAgentMCPConfig for grok failed: %v", err)
+	}
+	grokData, err := os.ReadFile(grokPath)
+	if err != nil {
+		t.Fatalf("failed to read grok config: %v", err)
+	}
+	grokGot := string(grokData)
+	for _, want := range []string{
+		`[ui]`,
+		`max_thoughts_width = 120`,
+		`[mcp_servers.tukey]`,
+		`command = "/usr/local/bin/tukey"`,
+		`args = ["mcp", "/tmp/project/grok-results.json"]`,
+		`enabled = true`,
+	} {
+		if !strings.Contains(grokGot, want) {
+			t.Fatalf("grok merged config missing %q:\n%s", want, grokGot)
+		}
+	}
+	if strings.Count(grokGot, "[mcp_servers.tukey]") != 1 {
+		t.Fatalf("grok merged config should contain one tukey block:\n%s", grokGot)
 	}
 }
