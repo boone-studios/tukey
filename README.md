@@ -130,6 +130,7 @@ To install Tukey's MCP server configuration and skill file for a supported agent
 tukey agent --agent codex
 tukey agent --agent claude
 tukey agent --agent antigravity
+tukey agent --agent cursor
 ```
 
 Add `--global` to install into the agent's global settings instead of the current project.

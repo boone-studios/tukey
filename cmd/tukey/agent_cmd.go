@@ -88,6 +88,17 @@ var supportedAgents = []AgentInfo{
 		NeedsSkillFile: true,
 		SkillFile:      filepath.Join("skills", "tukey", "SKILL.md"),
 	},
+	{
+		Name:           "Cursor",
+		Key:            "cursor",
+		Description:    "Configure for Cursor (.cursor/mcp.json)",
+		GlobalDir:      ".cursor",
+		ProjectDir:     ".cursor",
+		SettingsFile:   "mcp.json",
+		ConfigFormat:   agentConfigJSON,
+		NeedsSkillFile: true,
+		SkillFile:      filepath.Join("skills", "tukey", "SKILL.md"),
+	},
 }
 
 func findAgent(key string) (AgentInfo, bool) {

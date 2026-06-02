@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **CLI**
     - Use `.tukey.yml` or `.tukey.json` for per-project configuration.
     - Added Codex as a `tukey agent --agent codex` target, writing Codex MCP config and a Tukey skill file for project or global installs.
+    - Added Cursor as a `tukey agent --agent cursor` target, writing `.cursor/mcp.json` and a Tukey skill file for project or global installs.
 - **Docs**
     - Added `AGENTS.md`, an agent-facing architecture guide covering project layout, the analysis pipeline, feature status vs. `README.md`, and extension guidelines for new languages and outputs.
 - **Output**

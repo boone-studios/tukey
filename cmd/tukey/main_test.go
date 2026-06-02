@@ -383,6 +383,10 @@ func TestParseAgentArgs(t *testing.T) {
 			want: &agentConfig{agent: "codex"},
 		},
 		{
+			args: []string{"--agent", "cursor"},
+			want: &agentConfig{agent: "cursor"},
+		},
+		{
 			args:    []string{"--agent"},
 			wantErr: true,
 		},
@@ -422,6 +426,71 @@ func TestFindAgent_CodexAliases(t *testing.T) {
 		if agent.SkillFile != "skills/tukey/SKILL.md" {
 			t.Fatalf("Codex skill file = %q, want skills/tukey/SKILL.md", agent.SkillFile)
 		}
+	}
+}
+
+func TestFindAgent_Cursor(t *testing.T) {
+	agent, ok := findAgent("cursor")
+	if !ok {
+		t.Fatal("findAgent(\"cursor\") did not find Cursor")
+	}
+	if agent.Key != "cursor" {
+		t.Fatalf("findAgent(\"cursor\") = %q, want cursor", agent.Key)
+	}
+	if agent.ConfigFormat != agentConfigJSON {
+		t.Fatalf("Cursor config format = %q, want %q", agent.ConfigFormat, agentConfigJSON)
+	}
+	if agent.SkillFile != "skills/tukey/SKILL.md" {
+		t.Fatalf("Cursor skill file = %q, want skills/tukey/SKILL.md", agent.SkillFile)
+	}
+}
+
+func TestMergeJSONMCPConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/mcp.json"
+	existing := `{
+  "mcpServers": {
+    "other-server": {
+      "command": "npx",
+      "args": ["-y", "some-mcp-server"]
+    },
+    "tukey": {
+      "command": "/old/tukey",
+      "args": ["mcp", "/old/results.json"]
+    }
+  }
+}
+`
+	if err := os.WriteFile(path, []byte(existing), 0644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	agent, ok := findAgent("cursor")
+	if !ok {
+		t.Fatal("Cursor agent not registered")
+	}
+	if err := mergeAgentMCPConfig(agent, path, `/Applications/Tukey "Dev"/tukey`, `/tmp/project/tukey-results.json`); err != nil {
+		t.Fatalf("mergeAgentMCPConfig failed: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+	got := string(data)
+	for _, want := range []string{
+		`"other-server"`,
+		`"npx"`,
+		`"tukey"`,
+		`/Applications/Tukey \"Dev\"/tukey`,
+		`"/tmp/project/tukey-results.json"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("merged config missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "/old/tukey") {
+		t.Fatalf("merged config retained old tukey command:\n%s", got)
 	}
 }
 
