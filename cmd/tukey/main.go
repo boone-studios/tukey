@@ -44,6 +44,12 @@ func main() {
 		return
 	}
 
+	// Dispatch init subcommand.
+	if len(os.Args) > 1 && os.Args[1] == "init" {
+		runInit(os.Args[2:])
+		return
+	}
+
 	argv, err := parseArgs()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -434,6 +440,7 @@ USAGE:
     tukey [FLAGS] <directory>       Run analysis on a codebase
     tukey query [FLAG] <file>       Query a pre-built analysis file
     tukey mcp [FLAG] [file]         Start a native Model Context Protocol (MCP) server
+    tukey init [FLAGS] [directory]  Initialize tukey configuration in a project
 
 FLAGS (analysis):
     -v, --verbose           Show detailed output including function usage report
@@ -478,6 +485,7 @@ EXAMPLES:
     tukey query --dependents "PaymentService" analysis.json
     tukey query --orphans analysis.json
     tukey mcp analysis.json
+    tukey init ./my-project
 
 `, version)
 }
