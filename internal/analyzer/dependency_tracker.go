@@ -144,6 +144,10 @@ func (dt *DependencyTracker) processImports(file *models.ParsedFile) {
 
 // createDependency establishes a dependency relationship
 func (dt *DependencyTracker) createDependency(usage models.UsageElement, file *models.ParsedFile) {
+	if usage.Context == "" {
+		return
+	}
+
 	// Find the source node (where the usage occurs)
 	var sourceNode *models.DependencyNode
 	for _, node := range dt.graph.Nodes {

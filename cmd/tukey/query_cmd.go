@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/boone-studios/tukey/internal/config"
 	"github.com/boone-studios/tukey/pkg/query"
 )
 
@@ -108,7 +109,23 @@ func parseQueryArgs(args []string) (*queryConfig, error) {
 		return nil, fmt.Errorf("query requires one of: --find TERM, --callers TERM, --dependents TERM, --orphans")
 	}
 	if cfg.inputFile == "" {
-		return nil, fmt.Errorf("query requires an analysis file path (e.g. analysis.json)")
+		// Try to find a default analysis file
+		// 1. Look in the local directory config (.tukey.json etc.)
+		if fileCfg, err := config.LoadConfig("."); err == nil && fileCfg.OutputFile != "" {
+			if _, err := os.Stat(fileCfg.OutputFile); err == nil {
+				cfg.inputFile = fileCfg.OutputFile
+			}
+		}
+		// 2. Fall back to "tukey-results.json" if it exists
+		if cfg.inputFile == "" {
+			if _, err := os.Stat("tukey-results.json"); err == nil {
+				cfg.inputFile = "tukey-results.json"
+			}
+		}
+		// 3. If still empty, return error
+		if cfg.inputFile == "" {
+			return nil, fmt.Errorf("query requires an analysis file path (e.g. tukey-results.json)")
+		}
 	}
 	return cfg, nil
 }

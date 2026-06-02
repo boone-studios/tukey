@@ -178,6 +178,46 @@ func TestParseQueryArgs_MissingFile(t *testing.T) {
 	}
 }
 
+func TestParseQueryArgs_DefaultFile(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "tukey-query-test")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	oldWd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("failed to get working dir: %v", err)
+	}
+	defer func() {
+		_ = os.Chdir(oldWd)
+	}()
+
+	if err := os.Chdir(tmpDir); err != nil {
+		t.Fatalf("failed to change working dir: %v", err)
+	}
+
+	// Case 1: No file exists, should error
+	_, err = parseQueryArgs([]string{"--find", "Foo"})
+	if err == nil {
+		t.Error("expected error when no default file exists")
+	}
+
+	// Case 2: "tukey-results.json" exists, should default to it
+	dummyFile := "tukey-results.json"
+	if err := os.WriteFile(dummyFile, []byte("{}"), 0644); err != nil {
+		t.Fatalf("failed to write dummy file: %v", err)
+	}
+
+	cfg, err := parseQueryArgs([]string{"--find", "Foo"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.inputFile != "tukey-results.json" {
+		t.Errorf("expected default to be tukey-results.json, got %s", cfg.inputFile)
+	}
+}
+
 func TestParseQueryArgs_MissingTerm(t *testing.T) {
 	tests := [][]string{
 		{"--find"},
