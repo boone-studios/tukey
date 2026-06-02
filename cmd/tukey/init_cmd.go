@@ -11,6 +11,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/boone-studios/tukey/internal/parser"
 	"golang.org/x/term"
@@ -369,6 +371,22 @@ func promptCheckboxes(options []CheckboxOption) ([]string, error) {
 			continue
 		}
 
+		// Handle split reads of Escape sequences:
+		// If we only read 1 byte and it's Escape (27), check if more bytes are coming immediately.
+		if n == 1 && buf[0] == 27 {
+			syscall.SetNonblock(fd, true)
+			time.Sleep(10 * time.Millisecond)
+			extraBuf := make([]byte, 10)
+			nExtra, errExtra := os.Stdin.Read(extraBuf)
+			syscall.SetNonblock(fd, false)
+
+			if errExtra == nil && nExtra >= 2 {
+				buf[1] = extraBuf[0]
+				buf[2] = extraBuf[1]
+				n = 3
+			}
+		}
+
 		if n == 1 {
 			b := buf[0]
 			switch b {
@@ -391,7 +409,7 @@ func promptCheckboxes(options []CheckboxOption) ([]string, error) {
 			case 27: // Escape
 				return nil, fmt.Errorf("cancelled by user")
 			}
-		} else if n >= 3 && buf[0] == 27 && buf[1] == '[' {
+		} else if n >= 3 && buf[0] == 27 && (buf[1] == '[' || buf[1] == 'O') {
 			switch buf[2] {
 			case 'A': // Up
 				activeIdx = (activeIdx - 1 + len(options)) % len(options)
