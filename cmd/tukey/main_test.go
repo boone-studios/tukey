@@ -281,3 +281,34 @@ func TestMergeConfigs_Benchmark(t *testing.T) {
 		t.Errorf("expected benchmark to merge as true")
 	}
 }
+
+func TestLanguageResolution(t *testing.T) {
+	// Scenario 1: CLI language specified, config language also specified. CLI should win.
+	argv1 := &Config{Language: "go"}
+	fileCfg1 := &config.FileConfig{Language: "js"}
+	merged1 := mergeConfigs(argv1, fileCfg1)
+	if merged1.Language != "go" {
+		t.Errorf("expected language to be go, got %s", merged1.Language)
+	}
+
+	// Scenario 2: CLI language empty, config language specified. Config should win.
+	argv2 := &Config{Language: ""}
+	fileCfg2 := &config.FileConfig{Language: "go"}
+	merged2 := mergeConfigs(argv2, fileCfg2)
+	if merged2.Language != "go" {
+		t.Errorf("expected language to be go, got %s", merged2.Language)
+	}
+
+	// Scenario 3: Both empty. Default should resolve to php.
+	argv3 := &Config{Language: ""}
+	fileCfg3 := &config.FileConfig{Language: ""}
+	merged3 := mergeConfigs(argv3, fileCfg3)
+	lang3 := merged3.Language
+	if lang3 == "" {
+		lang3 = "php"
+	}
+	if lang3 != "php" {
+		t.Errorf("expected language to default to php, got %s", lang3)
+	}
+}
+

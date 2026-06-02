@@ -64,6 +64,10 @@ func main() {
 	// Merge CLI args with file config
 	argv = mergeConfigs(argv, fileCfg)
 
+	if argv.Language == "" {
+		argv.Language = "php"
+	}
+
 	if argv.ShowVersion {
 		displayVersion := version
 		if strings.HasPrefix(displayVersion, "v") {
@@ -425,9 +429,6 @@ func parseArgs() (*Config, error) {
 		argv.OutputFile = "tukey-results.json"
 	}
 
-	if argv.Language == "" {
-		argv.Language = "php"
-	}
 
 	return argv, nil
 }
