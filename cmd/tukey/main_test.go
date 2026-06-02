@@ -352,3 +352,55 @@ func TestLanguageResolution(t *testing.T) {
 	}
 }
 
+func TestParseAgentArgs(t *testing.T) {
+	tests := []struct {
+		args    []string
+		want    *agentConfig
+		wantErr bool
+	}{
+		{
+			args: []string{"-h"},
+			want: &agentConfig{showHelp: true},
+		},
+		{
+			args: []string{"--help"},
+			want: &agentConfig{showHelp: true},
+		},
+		{
+			args: []string{"-y", "-g"},
+			want: &agentConfig{yes: true, global: true},
+		},
+		{
+			args: []string{"--agent", "antigravity"},
+			want: &agentConfig{agent: "antigravity"},
+		},
+		{
+			args: []string{"--agent=claude"},
+			want: &agentConfig{agent: "claude"},
+		},
+		{
+			args:    []string{"--agent"},
+			wantErr: true,
+		},
+		{
+			args:    []string{"--unknown-flag"},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		got, err := parseAgentArgs(tt.args)
+		if (err != nil) != tt.wantErr {
+			t.Errorf("parseAgentArgs(%v) error = %v, wantErr %v", tt.args, err, tt.wantErr)
+			continue
+		}
+		if tt.wantErr {
+			continue
+		}
+		if got.showHelp != tt.want.showHelp || got.yes != tt.want.yes || got.global != tt.want.global || got.agent != tt.want.agent {
+			t.Errorf("parseAgentArgs(%v) = %+v, want %+v", tt.args, got, tt.want)
+		}
+	}
+}
+
+

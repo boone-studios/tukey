@@ -19,6 +19,66 @@ type agentConfig struct {
 	showHelp bool
 	yes      bool
 	global   bool
+	agent    string
+}
+
+// AgentInfo holds metadata and configuration directory paths for a target agent.
+type AgentInfo struct {
+	Name           string
+	Key            string
+	Aliases        []string
+	Description    string
+	GlobalDir      string // relative to user home directory
+	ProjectDir     string // relative to project root
+	SettingsFile   string // config file name (e.g. settings.json, mcp_config.json)
+	NeedsSkillFile bool
+}
+
+// ResolveGlobalDir returns the absolute path to the global settings folder for this agent.
+func (a AgentInfo) ResolveGlobalDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, a.GlobalDir), nil
+}
+
+// supportedAgents is the registry of agents. To support a new agent, simply add its AgentInfo here!
+var supportedAgents = []AgentInfo{
+	{
+		Name:           "Claude Code",
+		Key:            "claude",
+		Description:    "Configure for Claude Code (.claude/settings.json)",
+		GlobalDir:      ".claude",
+		ProjectDir:     ".claude",
+		SettingsFile:   "settings.json",
+		NeedsSkillFile: true,
+	},
+	{
+		Name:           "Antigravity",
+		Key:            "antigravity",
+		Aliases:        []string{"gemini"},
+		Description:    "Configure for Antigravity (.agents/mcp_config.json)",
+		GlobalDir:      filepath.Join(".gemini", "config"),
+		ProjectDir:     ".agents",
+		SettingsFile:   "mcp_config.json",
+		NeedsSkillFile: false,
+	},
+}
+
+func findAgent(key string) (AgentInfo, bool) {
+	k := strings.ToLower(key)
+	for _, agent := range supportedAgents {
+		if agent.Key == k {
+			return agent, true
+		}
+		for _, alias := range agent.Aliases {
+			if strings.ToLower(alias) == k {
+				return agent, true
+			}
+		}
+	}
+	return AgentInfo{}, false
 }
 
 // RadioOption is a single item in a single-select radio prompt.
@@ -40,12 +100,52 @@ func runAgent(args []string) {
 	}
 
 	fmt.Println("🤖 Tukey Agent Setup")
-	fmt.Println("   Configure Tukey for use with Claude Code agents")
+	fmt.Println("   Configure Tukey for use with AI agents")
 	fmt.Println()
 
 	isInteractive := !cfg.yes && term.IsTerminal(int(os.Stdin.Fd())) && term.IsTerminal(int(os.Stdout.Fd()))
 
-	// ── Step 1: scope ───────────────────────────────────────────────────────
+	// ── Step 1: select agent ──────────────────────────────────────────────────
+	var selectedAgent AgentInfo
+	if cfg.agent == "" {
+		if isInteractive {
+			fmt.Println("🤖 Select the agent to configure Tukey for:")
+			fmt.Println("   [Use Up/Down arrows to move, Enter to select, Ctrl+C to cancel]")
+			fmt.Println()
+
+			var agentOptions []RadioOption
+			for _, agent := range supportedAgents {
+				agentOptions = append(agentOptions, RadioOption{
+					Label:       agent.Name,
+					Description: agent.Description,
+				})
+			}
+			idx, err := promptRadio(agentOptions)
+			if err != nil {
+				fmt.Printf("\n❌ %v\n", err)
+				os.Exit(1)
+			}
+			selectedAgent = supportedAgents[idx]
+			fmt.Println()
+		} else {
+			// default is first one (Claude Code)
+			selectedAgent = supportedAgents[0]
+			fmt.Printf("🤖 Defaulting agent to: %s (%s)\n", selectedAgent.Key, selectedAgent.Name)
+		}
+	} else {
+		var found bool
+		selectedAgent, found = findAgent(cfg.agent)
+		if !found {
+			var names []string
+			for _, agent := range supportedAgents {
+				names = append(names, agent.Key)
+			}
+			fmt.Fprintf(os.Stderr, "❌ Unsupported agent: %s (supported: %s)\n", cfg.agent, strings.Join(names, ", "))
+			os.Exit(1)
+		}
+	}
+
+	// ── Step 2: scope ───────────────────────────────────────────────────────
 	isGlobal := cfg.global
 	if isInteractive {
 		fmt.Println("📍 Where should Tukey be configured?")
@@ -53,9 +153,16 @@ func runAgent(args []string) {
 		fmt.Println()
 
 		scopeOptions := []RadioOption{
-			{Label: "Project", Description: "this project only  (.claude/settings.json)"},
-			{Label: "Global", Description: "all projects       (~/.claude/settings.json)"},
+			{
+				Label:       "Project",
+				Description: fmt.Sprintf("this project only  (%s/%s)", selectedAgent.ProjectDir, selectedAgent.SettingsFile),
+			},
+			{
+				Label:       "Global",
+				Description: fmt.Sprintf("all projects       (~/%s/%s)", selectedAgent.GlobalDir, selectedAgent.SettingsFile),
+			},
 		}
+
 		idx, err := promptRadio(scopeOptions)
 		if err != nil {
 			fmt.Printf("\n❌ %v\n", err)
@@ -63,15 +170,9 @@ func runAgent(args []string) {
 		}
 		isGlobal = (idx == 1)
 		fmt.Println()
-	} else {
-		if isGlobal {
-			fmt.Println("🌐 Scope: global (~/.claude/settings.json)")
-		} else {
-			fmt.Println("📁 Scope: project (.claude/settings.json)")
-		}
 	}
 
-	// ── Step 2: derive paths ────────────────────────────────────────────────
+	// ── Step 3: derive paths ────────────────────────────────────────────────
 	execPath, err := os.Executable()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "❌ Could not determine executable path: %v\n", err)
@@ -91,14 +192,24 @@ func runAgent(args []string) {
 
 	var settingsBase string
 	if isGlobal {
-		home, err := os.UserHomeDir()
+		settingsBase, err = selectedAgent.ResolveGlobalDir()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Could not determine home directory: %v\n", err)
+			fmt.Fprintf(os.Stderr, "❌ Could not determine settings directory: %v\n", err)
 			os.Exit(1)
 		}
-		settingsBase = filepath.Join(home, ".claude")
 	} else {
-		settingsBase = filepath.Join(cwd, ".claude")
+		settingsBase = filepath.Join(cwd, selectedAgent.ProjectDir)
+	}
+
+	settingsPath := filepath.Join(settingsBase, selectedAgent.SettingsFile)
+
+	if !isInteractive {
+		fmt.Printf("🤖 Agent: %s\n", selectedAgent.Name)
+		if isGlobal {
+			fmt.Printf("🌐 Scope: global (%s)\n", settingsPath)
+		} else {
+			fmt.Printf("📁 Scope: project (%s)\n", settingsPath)
+		}
 	}
 
 	if err := os.MkdirAll(settingsBase, 0755); err != nil {
@@ -106,38 +217,39 @@ func runAgent(args []string) {
 		os.Exit(1)
 	}
 
-	// ── Step 3: write MCP config ────────────────────────────────────────────
-	settingsPath := filepath.Join(settingsBase, "settings.json")
+	// ── Step 4: write MCP config ────────────────────────────────────────────
 	if err := mergeAgentMCPConfig(settingsPath, execPath, analysisFile); err != nil {
 		fmt.Fprintf(os.Stderr, "❌ Failed to write MCP config: %v\n", err)
 		os.Exit(1)
 	}
 	fmt.Printf("✅ MCP server configured in %s\n", settingsPath)
 
-	// ── Step 4: write skill file ────────────────────────────────────────────
-	skillsDir := filepath.Join(settingsBase, "skills")
-	if err := os.MkdirAll(skillsDir, 0755); err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Could not create skills directory: %v\n", err)
-		os.Exit(1)
+	// ── Step 5: write skill file (if required by agent) ─────────────────────
+	if selectedAgent.NeedsSkillFile {
+		skillsDir := filepath.Join(settingsBase, "skills")
+		if err := os.MkdirAll(skillsDir, 0755); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Could not create skills directory: %v\n", err)
+			os.Exit(1)
+		}
+		skillPath := filepath.Join(skillsDir, "tukey.md")
+		if err := os.WriteFile(skillPath, []byte(tukeySkillContent), 0644); err != nil {
+			fmt.Fprintf(os.Stderr, "❌ Failed to write skill file: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("✅ Skill file written to %s\n", skillPath)
 	}
-	skillPath := filepath.Join(skillsDir, "tukey.md")
-	if err := os.WriteFile(skillPath, []byte(tukeySkilContent), 0644); err != nil {
-		fmt.Fprintf(os.Stderr, "❌ Failed to write skill file: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Printf("✅ Skill file written to %s\n", skillPath)
 
-	// ── Step 5: final guidance ──────────────────────────────────────────────
+	// ── Step 6: final guidance ──────────────────────────────────────────────
 	fmt.Println()
 	fmt.Println("🎉 Done! Next steps:")
 	fmt.Printf("   1. Run 'tukey -o %s .' to build the analysis\n", filepath.Base(analysisFile))
-	fmt.Println("   2. Restart Claude Code to load the new MCP server")
+	fmt.Printf("   2. Restart/refresh your %s client to load the new MCP server\n", selectedAgent.Name)
 	if !isGlobal {
-		fmt.Println("   3. Commit .claude/settings.json to share with your team")
+		fmt.Printf("   3. Commit %s/%s to share with your team\n", selectedAgent.ProjectDir, selectedAgent.SettingsFile)
 	}
 	fmt.Println()
 	fmt.Println("   Available tools once the server is loaded:")
-	fmt.Println("   • tukey_find_symbol        — search for a class, method, or function")
+	fmt.Println("   • tukey_find_symbol          — search for a class, method, or function")
 	fmt.Println("   • tukey_get_callers         — show what calls a symbol")
 	fmt.Println("   • tukey_get_dependents      — show what a symbol depends on")
 	fmt.Println("   • tukey_find_orphans        — list dead code candidates")
@@ -168,14 +280,17 @@ func detectAnalysisFilePath(root string) string {
 	return filepath.Join(root, "tukey-results.json")
 }
 
-// mergeAgentMCPConfig reads any existing settings.json, adds/overwrites the
+// mergeAgentMCPConfig reads any existing settings.json or mcp_config.json, adds/overwrites the
 // tukey MCP server entry, and writes it back.
 func mergeAgentMCPConfig(settingsPath, execPath, analysisFile string) error {
 	settings := make(map[string]interface{})
 
 	if data, err := os.ReadFile(settingsPath); err == nil {
-		if err := json.Unmarshal(data, &settings); err != nil {
-			return fmt.Errorf("existing %s contains invalid JSON: %w", settingsPath, err)
+		trimmed := strings.TrimSpace(string(data))
+		if len(trimmed) > 0 {
+			if err := json.Unmarshal(data, &settings); err != nil {
+				return fmt.Errorf("existing %s contains invalid JSON: %w", settingsPath, err)
+			}
 		}
 	}
 
@@ -225,7 +340,7 @@ func promptRadio(options []RadioOption) (int, error) {
 			if i == activeIdx {
 				radio = "\x1b[32m(•)\x1b[0m"
 			}
-			fmt.Printf("\x1b[2K\r%s%s \x1b[1m%-10s\x1b[0m \x1b[90m%s\x1b[0m\n",
+			fmt.Printf("\x1b[2K\r%s%s \x1b[1m%-12s\x1b[0m \x1b[90m%s\x1b[0m\n",
 				cursor, radio, opt.Label, opt.Description)
 		}
 		firstDraw = false
@@ -297,14 +412,23 @@ func promptRadioFallback(options []RadioOption) (int, error) {
 
 func parseAgentArgs(args []string) (*agentConfig, error) {
 	cfg := &agentConfig{}
-	for _, arg := range args {
-		switch arg {
-		case "-h", "--help":
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "-h" || arg == "--help":
 			cfg.showHelp = true
-		case "-y", "--yes":
+		case arg == "-y" || arg == "--yes":
 			cfg.yes = true
-		case "-g", "--global":
+		case arg == "-g" || arg == "--global":
 			cfg.global = true
+		case arg == "-a" || arg == "--agent":
+			if i+1 >= len(args) {
+				return nil, fmt.Errorf("missing value for --agent")
+			}
+			cfg.agent = args[i+1]
+			i++
+		case strings.HasPrefix(arg, "--agent="):
+			cfg.agent = strings.TrimPrefix(arg, "--agent=")
 		default:
 			if strings.HasPrefix(arg, "-") {
 				return nil, fmt.Errorf("unknown flag: %s", arg)
@@ -315,25 +439,31 @@ func parseAgentArgs(args []string) (*agentConfig, error) {
 }
 
 func showAgentHelp() {
-	fmt.Print(`tukey agent – configure Tukey for Claude Code agents
+	var names []string
+	for _, agent := range supportedAgents {
+		names = append(names, fmt.Sprintf("'%s'", agent.Key))
+	}
+	fmt.Printf(`tukey agent – configure Tukey for AI agents
 
 USAGE:
     tukey agent [FLAGS]
 
 FLAGS:
-    -g, --global   Install globally (~/.claude/) instead of this project (.claude/)
-    -y, --yes      Non-interactive mode (defaults to project scope)
+    -a, --agent    Specify target agent: %s (default: '%s')
+    -g, --global   Install globally instead of project-level
+    -y, --yes      Non-interactive mode (defaults to project scope and %s)
     -h, --help     Show this help message
 
 EXAMPLES:
     tukey agent
+    tukey agent --agent antigravity
     tukey agent --global
-    tukey agent --yes
-`)
+    tukey agent --agent antigravity --yes
+`, strings.Join(names, ", "), supportedAgents[0].Key, supportedAgents[0].Name)
 }
 
-// tukeySkilContent is written to .claude/skills/tukey.md (or the global equivalent).
-const tukeySkilContent = `---
+// tukeySkillContent is written to .claude/skills/tukey.md (or the global equivalent).
+const tukeySkillContent = `---
 description: Analyze code dependencies, find dead code, and trace call graphs using Tukey static analysis.
 ---
 
