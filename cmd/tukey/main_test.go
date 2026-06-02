@@ -379,6 +379,10 @@ func TestParseAgentArgs(t *testing.T) {
 			want: &agentConfig{agent: "claude"},
 		},
 		{
+			args: []string{"--agent", "codex"},
+			want: &agentConfig{agent: "codex"},
+		},
+		{
 			args:    []string{"--agent"},
 			wantErr: true,
 		},
@@ -403,4 +407,72 @@ func TestParseAgentArgs(t *testing.T) {
 	}
 }
 
+func TestFindAgent_CodexAliases(t *testing.T) {
+	for _, key := range []string{"codex", "CODEX", "openai"} {
+		agent, ok := findAgent(key)
+		if !ok {
+			t.Fatalf("findAgent(%q) did not find Codex", key)
+		}
+		if agent.Key != "codex" {
+			t.Fatalf("findAgent(%q) = %q, want codex", key, agent.Key)
+		}
+		if agent.ConfigFormat != agentConfigCodexTOML {
+			t.Fatalf("Codex config format = %q, want %q", agent.ConfigFormat, agentConfigCodexTOML)
+		}
+		if agent.SkillFile != "skills/tukey/SKILL.md" {
+			t.Fatalf("Codex skill file = %q, want skills/tukey/SKILL.md", agent.SkillFile)
+		}
+	}
+}
 
+func TestMergeCodexTOMLConfig(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/config.toml"
+	existing := `[projects."/tmp/project"]
+trust_level = "trusted"
+
+[mcp_servers.tukey]
+command = "/old/tukey"
+args = ["mcp", "/old/results.json"]
+enabled = true
+
+[plugins."browser-use@openai-bundled"]
+enabled = true
+`
+	if err := os.WriteFile(path, []byte(existing), 0644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	agent, ok := findAgent("codex")
+	if !ok {
+		t.Fatal("Codex agent not registered")
+	}
+	if err := mergeAgentMCPConfig(agent, path, `/Applications/Tukey "Dev"/tukey`, `/tmp/project/tukey-results.json`); err != nil {
+		t.Fatalf("mergeAgentMCPConfig failed: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("failed to read config: %v", err)
+	}
+	got := string(data)
+	for _, want := range []string{
+		`[projects."/tmp/project"]`,
+		`trust_level = "trusted"`,
+		`[plugins."browser-use@openai-bundled"]`,
+		`[mcp_servers.tukey]`,
+		`command = "/Applications/Tukey \"Dev\"/tukey"`,
+		`args = ["mcp", "/tmp/project/tukey-results.json"]`,
+		`enabled = true`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("merged config missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "/old/tukey") {
+		t.Fatalf("merged config retained old tukey block:\n%s", got)
+	}
+	if strings.Count(got, "[mcp_servers.tukey]") != 1 {
+		t.Fatalf("merged config should contain one tukey block:\n%s", got)
+	}
+}

@@ -435,7 +435,6 @@ func parseArgs() (*Config, error) {
 		argv.OutputFile = "tukey-results.json"
 	}
 
-
 	return argv, nil
 }
 
@@ -448,7 +447,7 @@ USAGE:
     tukey query [FLAG] <file>       Query a pre-built analysis file
     tukey mcp [FLAG] [file]         Start a native Model Context Protocol (MCP) server
     tukey init [FLAGS] [directory]  Initialize tukey configuration in a project
-    tukey agent [FLAGS]             Configure Tukey for use with Claude Code agents
+    tukey agent [FLAGS]             Configure Tukey for use with AI coding agents
 
 FLAGS (analysis):
     -v, --verbose           Show detailed output including function usage report

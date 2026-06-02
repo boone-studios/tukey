@@ -22,6 +22,13 @@ type agentConfig struct {
 	agent    string
 }
 
+type agentConfigFormat string
+
+const (
+	agentConfigJSON      agentConfigFormat = "json"
+	agentConfigCodexTOML agentConfigFormat = "codex-toml"
+)
+
 // AgentInfo holds metadata and configuration directory paths for a target agent.
 type AgentInfo struct {
 	Name           string
@@ -31,7 +38,9 @@ type AgentInfo struct {
 	GlobalDir      string // relative to user home directory
 	ProjectDir     string // relative to project root
 	SettingsFile   string // config file name (e.g. settings.json, mcp_config.json)
+	ConfigFormat   agentConfigFormat
 	NeedsSkillFile bool
+	SkillFile      string // relative to the agent settings base directory
 }
 
 // ResolveGlobalDir returns the absolute path to the global settings folder for this agent.
@@ -52,7 +61,9 @@ var supportedAgents = []AgentInfo{
 		GlobalDir:      ".claude",
 		ProjectDir:     ".claude",
 		SettingsFile:   "settings.json",
+		ConfigFormat:   agentConfigJSON,
 		NeedsSkillFile: true,
+		SkillFile:      filepath.Join("skills", "tukey.md"),
 	},
 	{
 		Name:           "Antigravity",
@@ -62,7 +73,20 @@ var supportedAgents = []AgentInfo{
 		GlobalDir:      filepath.Join(".gemini", "config"),
 		ProjectDir:     ".agents",
 		SettingsFile:   "mcp_config.json",
+		ConfigFormat:   agentConfigJSON,
 		NeedsSkillFile: false,
+	},
+	{
+		Name:           "Codex",
+		Key:            "codex",
+		Aliases:        []string{"openai"},
+		Description:    "Configure for Codex (.codex/config.toml)",
+		GlobalDir:      ".codex",
+		ProjectDir:     ".codex",
+		SettingsFile:   "config.toml",
+		ConfigFormat:   agentConfigCodexTOML,
+		NeedsSkillFile: true,
+		SkillFile:      filepath.Join("skills", "tukey", "SKILL.md"),
 	},
 }
 
@@ -218,7 +242,7 @@ func runAgent(args []string) {
 	}
 
 	// ── Step 4: write MCP config ────────────────────────────────────────────
-	if err := mergeAgentMCPConfig(settingsPath, execPath, analysisFile); err != nil {
+	if err := mergeAgentMCPConfig(selectedAgent, settingsPath, execPath, analysisFile); err != nil {
 		fmt.Fprintf(os.Stderr, "❌ Failed to write MCP config: %v\n", err)
 		os.Exit(1)
 	}
@@ -226,12 +250,11 @@ func runAgent(args []string) {
 
 	// ── Step 5: write skill file (if required by agent) ─────────────────────
 	if selectedAgent.NeedsSkillFile {
-		skillsDir := filepath.Join(settingsBase, "skills")
-		if err := os.MkdirAll(skillsDir, 0755); err != nil {
+		skillPath := filepath.Join(settingsBase, selectedAgent.SkillFile)
+		if err := os.MkdirAll(filepath.Dir(skillPath), 0755); err != nil {
 			fmt.Fprintf(os.Stderr, "❌ Could not create skills directory: %v\n", err)
 			os.Exit(1)
 		}
-		skillPath := filepath.Join(skillsDir, "tukey.md")
 		if err := os.WriteFile(skillPath, []byte(tukeySkillContent), 0644); err != nil {
 			fmt.Fprintf(os.Stderr, "❌ Failed to write skill file: %v\n", err)
 			os.Exit(1)
@@ -280,9 +303,22 @@ func detectAnalysisFilePath(root string) string {
 	return filepath.Join(root, "tukey-results.json")
 }
 
-// mergeAgentMCPConfig reads any existing settings.json or mcp_config.json, adds/overwrites the
+// mergeAgentMCPConfig reads any existing agent settings file, adds/overwrites the
+// tukey MCP server entry, and writes it back in the format required by the target agent.
+func mergeAgentMCPConfig(agent AgentInfo, settingsPath, execPath, analysisFile string) error {
+	switch agent.ConfigFormat {
+	case "", agentConfigJSON:
+		return mergeJSONMCPConfig(settingsPath, execPath, analysisFile)
+	case agentConfigCodexTOML:
+		return mergeCodexTOMLConfig(settingsPath, execPath, analysisFile)
+	default:
+		return fmt.Errorf("unsupported config format %q", agent.ConfigFormat)
+	}
+}
+
+// mergeJSONMCPConfig reads any existing settings.json or mcp_config.json, adds/overwrites the
 // tukey MCP server entry, and writes it back.
-func mergeAgentMCPConfig(settingsPath, execPath, analysisFile string) error {
+func mergeJSONMCPConfig(settingsPath, execPath, analysisFile string) error {
 	settings := make(map[string]interface{})
 
 	if data, err := os.ReadFile(settingsPath); err == nil {
@@ -309,6 +345,60 @@ func mergeAgentMCPConfig(settingsPath, execPath, analysisFile string) error {
 		return err
 	}
 	return os.WriteFile(settingsPath, data, 0644)
+}
+
+// mergeCodexTOMLConfig updates Codex's config.toml with a stdio MCP server entry.
+func mergeCodexTOMLConfig(settingsPath, execPath, analysisFile string) error {
+	var content string
+	if data, err := os.ReadFile(settingsPath); err == nil {
+		content = string(data)
+	}
+
+	content = removeTOMLTable(content, "[mcp_servers.tukey]")
+	content = strings.TrimRight(content, "\n")
+	if content != "" {
+		content += "\n\n"
+	}
+	content += fmt.Sprintf(`[mcp_servers.tukey]
+command = %s
+args = [%s, %s]
+enabled = true
+`, tomlString(execPath), tomlString("mcp"), tomlString(analysisFile))
+
+	return os.WriteFile(settingsPath, []byte(content), 0644)
+}
+
+func removeTOMLTable(content, header string) string {
+	lines := strings.Split(content, "\n")
+	out := make([]string, 0, len(lines))
+	skipping := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == header {
+			skipping = true
+			continue
+		}
+		if skipping && strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			skipping = false
+		}
+		if !skipping {
+			out = append(out, line)
+		}
+	}
+
+	return strings.Join(out, "\n")
+}
+
+func tomlString(value string) string {
+	escaped := strings.NewReplacer(
+		"\\", "\\\\",
+		"\"", "\\\"",
+		"\n", "\\n",
+		"\r", "\\r",
+		"\t", "\\t",
+	).Replace(value)
+	return `"` + escaped + `"`
 }
 
 // promptRadio shows a single-select list; returns the index of the chosen option.
@@ -368,7 +458,7 @@ func promptRadio(options []RadioOption) (int, error) {
 
 		if n == 1 {
 			switch buf[0] {
-			case 3:     // Ctrl+C
+			case 3: // Ctrl+C
 				return 0, fmt.Errorf("cancelled by user")
 			case 13, 10: // Enter
 				return activeIdx, nil
@@ -459,11 +549,13 @@ EXAMPLES:
     tukey agent --agent antigravity
     tukey agent --global
     tukey agent --agent antigravity --yes
+    tukey agent --agent codex
 `, strings.Join(names, ", "), supportedAgents[0].Key, supportedAgents[0].Name)
 }
 
-// tukeySkillContent is written to .claude/skills/tukey.md (or the global equivalent).
+// tukeySkillContent is written to each agent's skill path when that agent supports skills.
 const tukeySkillContent = `---
+name: tukey
 description: Analyze code dependencies, find dead code, and trace call graphs using Tukey static analysis.
 ---
 
@@ -488,5 +580,5 @@ Use the Tukey MCP tools to answer questions about this codebase's dependency str
 tukey -o tukey-results.json .
 ` + "```" + `
 
-Then restart Claude Code to reload the MCP server.
+Then restart or refresh your agent client to reload the MCP server.
 `
