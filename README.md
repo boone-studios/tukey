@@ -4,7 +4,7 @@ A high-performance static analysis tool that maps code dependencies, highlights 
 large projects. Designed to be **language-agnostic**, the engine can analyze code architecture and usage patterns in any
 language.
 
-The initial release focuses on **PHP support**, with additional languages planned for the future.
+Currently supports **PHP**, **JavaScript**, and **Go**.
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/boone-studios/tukey)](https://goreportcard.com/report/github.com/boone-studios/tukey)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -15,6 +15,7 @@ The initial release focuses on **PHP support**, with additional languages planne
 - 🕸️ Dependency Mapping — Builds comprehensive graphs showing code relationships
 - 📊 Complexity Metrics — Identifies areas of high complexity
 - 🎯 Usage Tracking — Finds where functions and classes are used across the project
+- 🤖 Native MCP Server — Exposes code dependency search, caller tracing, and dead code detection directly to AI agents (like Cursor, Claude Desktop, and Zed)
 - 👻 Dead Code Detection — Flags unused or orphaned code
 - ⚡ High Performance — Concurrent processing for fast analysis of large projects
 
@@ -42,16 +43,28 @@ Download the latest release from the [releases page](https://github.com/boone-st
 
 ```bash
 # Basic analysis
-tukey /path/to/your/php/project
+tukey /path/to/your/project
 
 # Verbose output with function usage report
-tukey -v /path/to/your/php/project
+tukey -v /path/to/your/project
+
+# Benchmark mode (quiet execution with performance and resource profiling)
+tukey -b /path/to/your/project
+
+# Compare current graph against baseline (structural diff and regression auditing)
+tukey --compare baseline.json /path/to/your/project
+
+# Enforce boundaries strictly (exits with non-zero code if architectural violations exist)
+tukey --compare baseline.json --strict /path/to/your/project
 
 # Export results to JSON
-tukey -v --output analysis.json /path/to/your/php/project
+tukey -v --output analysis.json /path/to/your/project
 
 # Exclude directories
-tukey --exclude vendor --exclude tests /path/to/your/php/project
+tukey --exclude vendor --exclude tests /path/to/your/project
+
+# Start a native Model Context Protocol (MCP) server for AI agents
+tukey mcp analysis.json
 ```
 
 ## Configuration
@@ -65,6 +78,21 @@ verbose: true
 excludeDirs:
   - bootstrap
   - public
+
+# Configure architectural boundary guardrails
+architecture:
+  layers:
+    - name: Domain
+      path: app/Domain
+    - name: Application
+      path: app/Services
+    - name: Infrastructure
+      path: app/Infrastructure
+  rules:
+    - from: Domain
+      cannot_depend_on: [Application, Infrastructure]
+    - from: Application
+      cannot_depend_on: [Infrastructure]
 ```
 
 If you prefer JSON, you can use a `.tukey.json` file instead.
@@ -77,14 +105,76 @@ If you prefer JSON, you can use a `.tukey.json` file instead.
   "excludeDirs": [
     "bootstrap",
     "public"
-  ]
+  ],
+  "architecture": {
+    "layers": [
+      { "name": "Domain", "path": "app/Domain" },
+      { "name": "Application", "path": "app/Services" },
+      { "name": "Infrastructure", "path": "app/Infrastructure" }
+    ],
+    "rules": [
+      { "from": "Domain", "cannot_depend_on": ["Application", "Infrastructure"] },
+      { "from": "Application", "cannot_depend_on": ["Infrastructure"] }
+    ]
+  }
 }
 ```
+
+## AI Agent Integration (Tukey Skill & MCP Server)
+
+Tukey is natively designed to act as a **machine-readable codebase map for AI agents** (like Codex, Gemini, Claude, Cursor, Grok, and other agentic coding assistants). If you are using AI agents to explore or edit your codebase, Tukey offers two integration pathways:
+
+To install Tukey's MCP server configuration and skill file for a supported agent, use:
+
+```bash
+tukey agent --agent codex
+tukey agent --agent claude
+tukey agent --agent antigravity
+tukey agent --agent cursor
+tukey agent --agent grok
+```
+
+Add `--global` to install into the agent's global settings instead of the current project.
+
+### 1. Native Model Context Protocol (MCP) Server
+Tukey features a built-in MCP server that communicates via JSON-RPC 2.0 over standard I/O (stdin/stdout). This allows compatible tools (e.g., Claude Code, Cursor, Grok, Zed) to invoke Tukey tools directly within the agent's tool-use loop without shell execution permissions or subprocess spawning overhead.
+
+#### Quick Start (MCP)
+1. **Analyze your codebase** to generate the graph file:
+   ```bash
+   tukey -o tukey-results.json /path/to/your/project
+   ```
+2. **Start the MCP server**:
+   ```bash
+   tukey mcp tukey-results.json
+   ```
+
+To configure the server in your MCP host (like `mcpSettings.json`), add:
+```json
+{
+  "mcpServers": {
+    "tukey": {
+      "command": "tukey",
+      "args": ["mcp", "/absolute/path/to/your/tukey-results.json"]
+    }
+  }
+}
+```
+
+Exposed MCP Tools:
+- `tukey_find_symbol` (args: `term` string) — Locate classes, methods, and functions.
+- `tukey_get_callers` (args: `symbol` string) — Trace what calls/references a symbol.
+- `tukey_get_dependents` (args: `symbol` string) — Trace what a symbol depends on.
+- `tukey_find_orphans` — Identify candidate dead or orphaned code.
+- `tukey_get_localized_context` (args: `symbol` string, `depth` int [optional]) — Retrieve a pruned context sub-graph (containing targets, dependencies, and dependents) around a symbol (ideal for AI context pruning).
+
+### 2. Tukey Command Line Skill
+You can also feed Tukey's compact query capabilities directly to LLMs as a CLI skill. For a detailed guide on CLI-based agent configurations, including circular dependency audits, performance benchmarking, and architectural layer checks, see [docs/tukey_skill.md](docs/tukey_skill.md).
 
 ## Use Cases
 
 ### Legacy Code Understanding
-Perfect for analyzing inherited PHP codebases with little documentation:
+Perfect for analyzing inherited codebases with little documentation:
 
 ```bash
 tukey -v ./legacy-project
@@ -156,7 +246,7 @@ Identify refactoring opportunities:
 
 | Tool                   | Language Focus                   | Primary Purpose                                | Output Style                 | Complexity/Dependency Metrics   | Multi-language     | CI/CD Friendly      | Footprint                     |
 | ---------------------- | -------------------------------- | ---------------------------------------------- | ---------------------------- | --------------------------------|--------------------| ------------------- | ----------------------------- |
-| **Tukey**              | PHP first (pluggable for others) | **Maps dependencies, complexity, and orphans** | Console summary, JSON export | ✅ Yes (graph, hotspots, orphans) | 🌍 Designed for it | ✅ Simple JSON + CLI | ⚡ Lightweight (single binary) |
+| **Tukey**              | PHP, JavaScript, Go             | **Maps dependencies, complexity, and orphans** | Console summary, JSON export | ✅ Yes (graph, hotspots, orphans) | 🌍 Designed for it | ✅ Simple JSON + CLI | ⚡ Lightweight (single binary) |
 | PHPStan                | PHP                              | Type safety, strict type checking              | CLI, IDE integration         | ❌ No                            | ❌ No               | ✅ Yes               | ⚖️ Medium (lots of rules)     |
 | Psalm                  | PHP                              | Type checking + code correctness               | CLI, IDE integration         | ❌ No                            | ❌ No               | ✅ Yes               | ⚖️ Medium                     |
 | PDepend                | PHP                              | Code metrics, class dependencies               | XML, charts, reports         | ✅ Yes (metrics & graphs)        | ❌ No               | ⚠️ Limited          | 🐘 Heavier (XML reports)      |
@@ -170,8 +260,10 @@ Identify refactoring opportunities:
 
 * **Tukey is not a linter**: it doesn’t enforce style or types. Instead, it **draws the map** of your system.
 * **Output is lightweight**: JSON + console means you can plug it into CI pipelines or explore locally without dashboards.
-* **Language-agnostic design**: while starting with PHP, the parser interface makes adding new languages straightforward.
+* **Language-agnostic design**: support for PHP, JavaScript, and Go, with an interface that makes adding new languages straightforward.
 * **Zero infrastructure**: unlike SonarQube, Tukey is just a single binary — no servers, no databases.
+
+For an in-depth, philosophical and technical analysis of how Tukey compares to enterprise quality gates, see the [SonarQube Comparison Guide](docs/sonarqube_comparison.md).
 
 ## Architecture
 
@@ -219,14 +311,18 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Roadmap
 
-- [ ] Web dashboard for dependency visualization
+For an in-depth, multi-phase breakdown of Tukey's long-term vision, proposed implementation details, and tracking, see the [Development Roadmap](ROADMAP.md).
+
+Quick summary of upcoming targets:
+- [x] Circular dependency detection & cycles analysis
+- [ ] Version Control (Git) Integration (complexity vs. churn and blast radius analysis)
+- [x] Architectural boundary enforcement & layer guardrails (`--strict` and configs)
+- [x] AI Agent MCP micro-graph context pruning (`tukey_get_localized_context`)
+- [x] Polyglot analysis (PHP, JavaScript, Go)
+- [ ] Web dashboard for interactive dependency visualization
 - [ ] Integration with popular IDEs
-- [ ] Laravel-specific analysis patterns
-- [ ] Circular dependency detection
-- [ ] Performance bottleneck identification
-- [ ] Git integration for change impact analysis
 
 ## Acknowledgments
 
-- Inspired by the need to understand complex legacy PHP codebases
+- Inspired by the need to understand complex legacy codebases
 - Built with Go for performance and cross-platform compatibility

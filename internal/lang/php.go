@@ -107,20 +107,42 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 	inClass := ""
 	inFunction := ""
 	braceDepth := 0
+	inMultiLineComment := false
 
 	for scanner.Scan() {
 		lineNum++
 		line := scanner.Text()
 		trimmedLine := strings.TrimSpace(line)
 
+		// Handle multi-line comment state transitions
+		if inMultiLineComment {
+			if idx := strings.Index(trimmedLine, "*/"); idx != -1 {
+				inMultiLineComment = false
+				trimmedLine = strings.TrimSpace(trimmedLine[idx+2:])
+			} else {
+				continue // skip entire line
+			}
+		}
+
+		if strings.HasPrefix(trimmedLine, "/*") {
+			if idx := strings.Index(trimmedLine[2:], "*/"); idx != -1 {
+				// Ends on the same line
+				trimmedLine = strings.TrimSpace(trimmedLine[2+idx+2:])
+			} else {
+				inMultiLineComment = true
+				continue
+			}
+		}
+
 		// Skip comments and empty lines
-		if strings.HasPrefix(trimmedLine, "//") || strings.HasPrefix(trimmedLine, "#") ||
-			strings.HasPrefix(trimmedLine, "/*") || trimmedLine == "" {
+		if strings.HasPrefix(trimmedLine, "//") || strings.HasPrefix(trimmedLine, "#") || trimmedLine == "" {
 			continue
 		}
 
-		// Track brace depth to know when we exit classes/functions
-		braceDepth += strings.Count(line, "{") - strings.Count(line, "}")
+		// Track brace depth to know when we exit classes/functions.
+		// Strip string and comment literals to avoid false positives.
+		cleanLine := stripCommentsAndStrings(line)
+		braceDepth += strings.Count(cleanLine, "{") - strings.Count(cleanLine, "}")
 
 		// Parse namespace
 		if matches := p.namespacePattern.FindStringSubmatch(line); matches != nil {
@@ -131,6 +153,30 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 		if inClass == "" {
 			if matches := p.usePattern.FindStringSubmatch(line); matches != nil {
 				parsed.Uses = append(parsed.Uses, matches[1])
+			} else if strings.HasPrefix(trimmedLine, "use ") && strings.Contains(trimmedLine, "{") && strings.Contains(trimmedLine, "}") && strings.HasSuffix(trimmedLine, ";") {
+				// Group use statement: e.g. use App\Models\{User, Order, Payment};
+				code := trimmedLine[4 : len(trimmedLine)-1] // e.g. "App\Models\{User, Order, Payment}"
+				openBrace := strings.Index(code, "{")
+				closeBrace := strings.Index(code, "}")
+				if openBrace != -1 && closeBrace > openBrace {
+					prefix := strings.TrimSpace(code[:openBrace])
+					if prefix != "" && !strings.HasSuffix(prefix, "\\") {
+						prefix = prefix + "\\"
+					}
+					partsStr := code[openBrace+1 : closeBrace]
+					parts := strings.Split(partsStr, ",")
+					for _, part := range parts {
+						part = strings.TrimSpace(part)
+						if part == "" {
+							continue
+						}
+						// Handle aliases in group use: e.g. "Order as ClientOrder"
+						if idx := strings.Index(strings.ToLower(part), " as "); idx != -1 {
+							part = strings.TrimSpace(part[:idx])
+						}
+						parsed.Uses = append(parsed.Uses, prefix+part)
+					}
+				}
 			}
 		}
 
@@ -441,21 +487,38 @@ func (p *PHPParser) isBuiltinFunction(funcName string) bool {
 	builtins := map[string]bool{
 		// Common PHP built-ins that we want to ignore
 		"array": true, "count": true, "isset": true, "empty": true,
-		"strlen": true, "substr": true, "strpos": true, "str_replace": true,
-		"preg_match": true, "preg_replace": true, "explode": true, "implode": true,
-		"trim": true, "ltrim": true, "rtrim": true, "strtolower": true, "strtoupper": true,
-		"ucfirst": true, "ucwords": true, "sprintf": true, "printf": true,
-		"file_get_contents": true, "file_put_contents": true, "fopen": true, "fclose": true,
-		"json_encode": true, "json_decode": true, "serialize": true, "unserialize": true,
-		"md5": true, "sha1": true, "hash": true, "base64_encode": true, "base64_decode": true,
-		"time": true, "date": true, "strtotime": true, "mktime": true,
-		"rand": true, "mt_rand": true, "shuffle": true, "array_merge": true, "array_keys": true,
-		"array_values": true, "array_filter": true, "array_map": true, "sort": true,
-		"var_dump": true, "print_r": true, "die": true, "exit": true, "echo": true, "print": true,
-		"include": true, "require": true, "include_once": true, "require_once": true,
-		"defined": true, "define": true, "constant": true, "get_class": true, "is_array": true,
-		"is_string": true, "is_numeric": true, "is_null": true, "is_object": true,
-		"call_user_func": true, "call_user_func_array": true, "func_get_args": true,
+		"strlen": true, "substr": true, "strpos": true, "stripos": true,
+		"str_replace": true, "str_ireplace": true, "preg_match": true, "preg_replace": true,
+		"explode": true, "implode": true, "trim": true, "ltrim": true, "rtrim": true,
+		"strtolower": true, "strtoupper": true, "ucfirst": true, "ucwords": true,
+		"sprintf": true, "printf": true, "file_get_contents": true, "file_put_contents": true,
+		"fopen": true, "fclose": true, "json_encode": true, "json_decode": true,
+		"serialize": true, "unserialize": true, "md5": true, "sha1": true, "hash": true,
+		"base64_encode": true, "base64_decode": true, "time": true, "date": true,
+		"strtotime": true, "mktime": true, "microtime": true, "rand": true, "mt_rand": true,
+		"shuffle": true, "array_merge": true, "array_keys": true, "array_values": true,
+		"array_filter": true, "array_map": true, "sort": true, "rsort": true, "asort": true,
+		"arsort": true, "ksort": true, "krsort": true, "usort": true, "in_array": true,
+		"array_key_exists": true, "array_shift": true, "array_pop": true, "array_push": true,
+		"array_unshift": true, "array_slice": true, "array_splice": true, "array_column": true,
+		"array_chunk": true, "array_reduce": true, "var_dump": true, "print_r": true,
+		"die": true, "exit": true, "echo": true, "print": true, "include": true, "require": true,
+		"include_once": true, "require_once": true, "defined": true, "define": true,
+		"constant": true, "get_class": true, "is_array": true, "is_string": true,
+		"is_numeric": true, "is_null": true, "is_object": true, "is_bool": true,
+		"is_int": true, "is_integer": true, "is_float": true, "is_double": true,
+		"is_long": true, "is_scalar": true, "is_resource": true, "is_callable": true,
+		"gettype": true, "settype": true, "intval": true, "floatval": true, "strval": true,
+		"boolval": true, "abs": true, "ceil": true, "floor": true, "round": true,
+		"max": true, "min": true, "pow": true, "sqrt": true, "file_exists": true,
+		"is_file": true, "is_dir": true, "mkdir": true, "rmdir": true, "unlink": true,
+		"fread": true, "fwrite": true, "fgets": true, "feof": true, "glob": true,
+		"basename": true, "dirname": true, "realpath": true, "pathinfo": true,
+		"class_exists": true, "interface_exists": true, "method_exists": true,
+		"property_exists": true, "function_exists": true, "is_subclass_of": true,
+		"is_a": true, "header": true, "setcookie": true, "session_start": true,
+		"session_destroy": true, "session_id": true, "call_user_func": true,
+		"call_user_func_array": true, "func_get_args": true,
 		// Common Laravel helpers (these might be custom, but very common)
 		"config": true, "env": true, "app": true, "view": true, "route": true, "url": true,
 		"asset": true, "redirect": true, "back": true, "old": true, "session": true,
@@ -492,6 +555,55 @@ func parseParameters(paramStr string) []string {
 	}
 
 	return result
+}
+
+// stripCommentsAndStrings removes string literals and single-line comments from a line of PHP code
+func stripCommentsAndStrings(line string) string {
+	var result strings.Builder
+	inDoubleQuote := false
+	inSingleQuote := false
+	escaped := false
+
+	for i := 0; i < len(line); i++ {
+		char := line[i]
+
+		if escaped {
+			escaped = false
+			continue
+		}
+		if char == '\\' && (inDoubleQuote || inSingleQuote) {
+			escaped = true
+			continue
+		}
+
+		if char == '"' && !inSingleQuote {
+			inDoubleQuote = !inDoubleQuote
+			continue
+		}
+		if char == '\'' && !inDoubleQuote {
+			inSingleQuote = !inSingleQuote
+			continue
+		}
+
+		if inDoubleQuote || inSingleQuote {
+			continue
+		}
+
+		// Check for single-line comments
+		if char == '/' && i+1 < len(line) {
+			nextChar := line[i+1]
+			if nextChar == '/' || nextChar == '*' {
+				break
+			}
+		}
+		if char == '#' {
+			break
+		}
+
+		result.WriteByte(char)
+	}
+
+	return result.String()
 }
 
 // ProcessFiles parses multiple PHP files concurrently

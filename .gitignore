@@ -38,3 +38,5 @@ config.local.yaml
 # Analysis outputs
 *.json
 analysis-*
+.tukey.json
+tukey-results.json

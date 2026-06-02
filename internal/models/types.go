@@ -89,6 +89,7 @@ type AnalysisResult struct {
 	TotalFiles     int
 	TotalElements  int
 	ProcessingTime string
+	Cycles         [][]string
 }
 
 // Lock Concurrency helpers (exported so other packages can coordinate safely)

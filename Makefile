@@ -67,6 +67,7 @@ lint:
 	golangci-lint run
 
 install: build
+	rm -f /usr/local/bin/$(BINARY_NAME)
 	cp $(BINARY_NAME) /usr/local/bin/
 
 dev:

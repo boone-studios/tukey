@@ -34,6 +34,9 @@ func NewProgressBar(total int, description string) *ProgressBar {
 
 // Update increments the progress bar
 func (pb *ProgressBar) Update(increment int) {
+	if pb == nil {
+		return
+	}
 	pb.current += increment
 
 	// Only update display every 100ms to avoid flickering
@@ -45,6 +48,9 @@ func (pb *ProgressBar) Update(increment int) {
 
 // SetCurrent sets the current progress value
 func (pb *ProgressBar) SetCurrent(current int) {
+	if pb == nil {
+		return
+	}
 	pb.current = current
 	if time.Since(pb.lastUpdate) > 100*time.Millisecond || pb.current >= pb.total {
 		pb.render()
@@ -54,6 +60,9 @@ func (pb *ProgressBar) SetCurrent(current int) {
 
 // Finish completes the progress bar
 func (pb *ProgressBar) Finish() {
+	if pb == nil {
+		return
+	}
 	pb.current = pb.total
 	pb.render()
 	fmt.Println() // New line after completion
@@ -61,6 +70,9 @@ func (pb *ProgressBar) Finish() {
 
 // render draws the progress bar
 func (pb *ProgressBar) render() {
+	if pb == nil {
+		return
+	}
 	percentage := float64(pb.current) / float64(pb.total) * 100
 	if percentage > 100 {
 		percentage = 100
@@ -125,6 +137,9 @@ func NewSpinner(message string) *Spinner {
 
 // Start begins the spinner animation
 func (s *Spinner) Start() {
+	if s == nil {
+		return
+	}
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -146,6 +161,9 @@ func (s *Spinner) Start() {
 
 // Stop ends the spinner
 func (s *Spinner) Stop() {
+	if s == nil {
+		return
+	}
 	s.once.Do(func() {
 		close(s.done)
 		s.wg.Wait()
@@ -154,5 +172,8 @@ func (s *Spinner) Stop() {
 
 // UpdateMessage changes the spinner message
 func (s *Spinner) UpdateMessage(message string) {
+	if s == nil {
+		return
+	}
 	s.message = message
 }
