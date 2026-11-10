@@ -96,6 +96,9 @@ DESCRIPTION:
       - tukey_get_analysis_diagnostics: Inspect parser and reference-resolution diagnostics
       - tukey_get_analysis_status: Check source freshness against the analysis snapshot
 
+    List responses accept limit (default 50, maximum 100 per collection) and cursor.
+    Follow page.nextCursor to continue. Localized context depth is capped at 5.
+
 EXAMPLES:
     tukey mcp analysis.json
     tukey mcp (uses default tukey-results.json in current directory)

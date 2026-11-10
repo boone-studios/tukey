@@ -144,91 +144,93 @@ func (s *Server) dispatch(method string, params json.RawMessage) (interface{}, *
 		return nil, nil
 
 	case "tools/list":
-		return ListToolsResult{
-			Tools: []Tool{
-				{
-					Name:        "tukey_find_symbol",
-					Description: "Find code elements (classes, methods, functions) whose name, namespace, or ID matches a search term.",
-					InputSchema: InputSchema{
-						Type: "object",
-						Properties: map[string]Property{
-							"term": {
-								Type:        "string",
-								Description: "The symbol name or substring to search for (e.g., 'GatewayFactory' or 'PaymentService::pay').",
-							},
+		tools := []Tool{
+			{
+				Name:        "tukey_find_symbol",
+				Description: "Find code elements (classes, methods, functions) whose name, namespace, or ID matches a search term.",
+				InputSchema: InputSchema{
+					Type: "object",
+					Properties: map[string]Property{
+						"term": {
+							Type:        "string",
+							Description: "The symbol name or substring to search for (e.g., 'GatewayFactory' or 'PaymentService::pay').",
 						},
-						Required: []string{"term"},
 					},
-				},
-				{
-					Name:        "tukey_get_callers",
-					Description: "Show incoming references with matched-target resolution and per-target relationship details.",
-					InputSchema: InputSchema{
-						Type: "object",
-						Properties: map[string]Property{
-							"symbol": {
-								Type:        "string",
-								Description: "The name, namespaced name, or exact ID of the target symbol.",
-							},
-						},
-						Required: []string{"symbol"},
-					},
-				},
-				{
-					Name:        "tukey_get_dependents",
-					Description: "Show outgoing references with matched-target resolution and per-target relationship details.",
-					InputSchema: InputSchema{
-						Type: "object",
-						Properties: map[string]Property{
-							"symbol": {
-								Type:        "string",
-								Description: "The name, namespaced name, or exact ID of the target symbol.",
-							},
-						},
-						Required: []string{"symbol"},
-					},
-				},
-				{
-					Name:        "tukey_find_orphans",
-					Description: "List all orphaned code elements (candidates for dead/unused code) that have zero dependencies and zero dependents.",
-					InputSchema: InputSchema{
-						Type: "object",
-					},
-				},
-				{
-					Name:        "tukey_get_analysis_diagnostics",
-					Description: "List parser errors and unresolved or ambiguous references that make the analysis incomplete.",
-					InputSchema: InputSchema{
-						Type: "object",
-					},
-				},
-				{
-					Name:        "tukey_get_analysis_status",
-					Description: "Check whether the current source tree matches the analysis snapshot and list added, modified, or deleted files.",
-					InputSchema: InputSchema{
-						Type: "object",
-					},
-				},
-				{
-					Name:        "tukey_get_localized_context",
-					Description: "Get a localized graph with matched targets, dependency and dependent nodes, and depth-labelled relationships.",
-					InputSchema: InputSchema{
-						Type: "object",
-						Properties: map[string]Property{
-							"symbol": {
-								Type:        "string",
-								Description: "The name, namespaced name, or exact ID of the target symbol.",
-							},
-							"depth": {
-								Type:        "integer",
-								Description: "The maximum depth of traversal (defaults to 1).",
-							},
-						},
-						Required: []string{"symbol"},
-					},
+					Required: []string{"term"},
 				},
 			},
-		}, nil
+			{
+				Name:        "tukey_get_callers",
+				Description: "Show incoming references with matched-target resolution and per-target relationship details.",
+				InputSchema: InputSchema{
+					Type: "object",
+					Properties: map[string]Property{
+						"symbol": {
+							Type:        "string",
+							Description: "The name, namespaced name, or exact ID of the target symbol.",
+						},
+					},
+					Required: []string{"symbol"},
+				},
+			},
+			{
+				Name:        "tukey_get_dependents",
+				Description: "Show outgoing references with matched-target resolution and per-target relationship details.",
+				InputSchema: InputSchema{
+					Type: "object",
+					Properties: map[string]Property{
+						"symbol": {
+							Type:        "string",
+							Description: "The name, namespaced name, or exact ID of the target symbol.",
+						},
+					},
+					Required: []string{"symbol"},
+				},
+			},
+			{
+				Name:        "tukey_find_orphans",
+				Description: "List all orphaned code elements (candidates for dead/unused code) that have zero dependencies and zero dependents.",
+				InputSchema: InputSchema{
+					Type: "object",
+				},
+			},
+			{
+				Name:        "tukey_get_analysis_diagnostics",
+				Description: "List parser errors and unresolved or ambiguous references that make the analysis incomplete.",
+				InputSchema: InputSchema{
+					Type: "object",
+				},
+			},
+			{
+				Name:        "tukey_get_analysis_status",
+				Description: "Check whether the current source tree matches the analysis snapshot and list added, modified, or deleted files.",
+				InputSchema: InputSchema{
+					Type: "object",
+				},
+			},
+			{
+				Name:        "tukey_get_localized_context",
+				Description: "Get a localized graph with matched targets, dependency and dependent nodes, and depth-labelled relationships.",
+				InputSchema: InputSchema{
+					Type: "object",
+					Properties: map[string]Property{
+						"symbol": {
+							Type:        "string",
+							Description: "The name, namespaced name, or exact ID of the target symbol.",
+						},
+						"depth": {
+							Type:        "integer",
+							Description: "The maximum depth of traversal (defaults to 1).",
+						},
+					},
+					Required: []string{"symbol"},
+				},
+			},
+		}
+		for i := range tools {
+			addPaginationProperties(&tools[i])
+		}
+		return ListToolsResult{Tools: tools}, nil
 
 	case "tools/call":
 		var callParams struct {
@@ -261,11 +263,27 @@ func (s *Server) dispatch(method string, params json.RawMessage) (interface{}, *
 	}
 }
 
+func addPaginationProperties(tool *Tool) {
+	if tool.InputSchema.Properties == nil {
+		tool.InputSchema.Properties = make(map[string]Property)
+	}
+	tool.InputSchema.Properties["limit"] = Property{
+		Type:        "integer",
+		Description: "Maximum items per collection (default 50, maximum 100).",
+	}
+	tool.InputSchema.Properties["cursor"] = Property{
+		Type:        "string",
+		Description: "Opaque continuation cursor from page.nextCursor.",
+	}
+}
+
 func (s *Server) handleToolCall(name string, args json.RawMessage) (string, bool) {
 	switch name {
 	case "tukey_find_symbol":
 		var arguments struct {
-			Term string `json:"term"`
+			Term   string `json:"term"`
+			Limit  int    `json:"limit"`
+			Cursor string `json:"cursor"`
 		}
 		if err := json.Unmarshal(args, &arguments); err != nil {
 			return "Error: failed to parse arguments: missing 'term' string.", true
@@ -273,17 +291,14 @@ func (s *Server) handleToolCall(name string, args json.RawMessage) (string, bool
 		if arguments.Term == "" {
 			return "Error: 'term' argument must be a non-empty string.", true
 		}
-
-		result := s.engine.Find(arguments.Term)
-		data, err := json.MarshalIndent(result, "", "  ")
-		if err != nil {
-			return fmt.Sprintf("Error encoding result: %v", err), true
-		}
-		return string(data), false
+		result, err := s.engine.FindWithOptions(arguments.Term, query.PageOptions{Limit: arguments.Limit, Cursor: arguments.Cursor})
+		return encodeToolResult(result, err)
 
 	case "tukey_get_callers":
 		var arguments struct {
 			Symbol string `json:"symbol"`
+			Limit  int    `json:"limit"`
+			Cursor string `json:"cursor"`
 		}
 		if err := json.Unmarshal(args, &arguments); err != nil {
 			return "Error: failed to parse arguments: missing 'symbol' string.", true
@@ -291,17 +306,14 @@ func (s *Server) handleToolCall(name string, args json.RawMessage) (string, bool
 		if arguments.Symbol == "" {
 			return "Error: 'symbol' argument must be a non-empty string.", true
 		}
-
-		result := s.engine.Callers(arguments.Symbol)
-		data, err := json.MarshalIndent(result, "", "  ")
-		if err != nil {
-			return fmt.Sprintf("Error encoding result: %v", err), true
-		}
-		return string(data), false
+		result, err := s.engine.CallersWithOptions(arguments.Symbol, query.PageOptions{Limit: arguments.Limit, Cursor: arguments.Cursor})
+		return encodeToolResult(result, err)
 
 	case "tukey_get_dependents":
 		var arguments struct {
 			Symbol string `json:"symbol"`
+			Limit  int    `json:"limit"`
+			Cursor string `json:"cursor"`
 		}
 		if err := json.Unmarshal(args, &arguments); err != nil {
 			return "Error: failed to parse arguments: missing 'symbol' string.", true
@@ -309,45 +321,39 @@ func (s *Server) handleToolCall(name string, args json.RawMessage) (string, bool
 		if arguments.Symbol == "" {
 			return "Error: 'symbol' argument must be a non-empty string.", true
 		}
-
-		result := s.engine.Dependents(arguments.Symbol)
-		data, err := json.MarshalIndent(result, "", "  ")
-		if err != nil {
-			return fmt.Sprintf("Error encoding result: %v", err), true
-		}
-		return string(data), false
+		result, err := s.engine.DependentsWithOptions(arguments.Symbol, query.PageOptions{Limit: arguments.Limit, Cursor: arguments.Cursor})
+		return encodeToolResult(result, err)
 
 	case "tukey_find_orphans":
-		result := s.engine.Orphans()
-		data, err := json.MarshalIndent(result, "", "  ")
+		options, err := parsePageOptions(args)
 		if err != nil {
-			return fmt.Sprintf("Error encoding result: %v", err), true
+			return fmt.Sprintf("Error: %v", err), true
 		}
-		return string(data), false
+		result, err := s.engine.OrphansWithOptions(options)
+		return encodeToolResult(result, err)
 
 	case "tukey_get_analysis_diagnostics":
-		result := s.engine.Diagnostics()
-		data, err := json.MarshalIndent(result, "", "  ")
+		options, err := parsePageOptions(args)
 		if err != nil {
-			return fmt.Sprintf("Error encoding result: %v", err), true
+			return fmt.Sprintf("Error: %v", err), true
 		}
-		return string(data), false
+		result, err := s.engine.DiagnosticsWithOptions(options)
+		return encodeToolResult(result, err)
 
 	case "tukey_get_analysis_status":
-		result, err := s.engine.Status()
+		options, err := parsePageOptions(args)
 		if err != nil {
-			return fmt.Sprintf("Error checking analysis status: %v", err), true
+			return fmt.Sprintf("Error: %v", err), true
 		}
-		data, err := json.MarshalIndent(result, "", "  ")
-		if err != nil {
-			return fmt.Sprintf("Error encoding result: %v", err), true
-		}
-		return string(data), false
+		result, err := s.engine.StatusWithOptions(options)
+		return encodeToolResult(result, err)
 
 	case "tukey_get_localized_context":
 		var arguments struct {
 			Symbol string `json:"symbol"`
 			Depth  *int   `json:"depth"`
+			Limit  int    `json:"limit"`
+			Cursor string `json:"cursor"`
 		}
 		if err := json.Unmarshal(args, &arguments); err != nil {
 			return "Error: failed to parse arguments: missing 'symbol' string.", true
@@ -355,22 +361,43 @@ func (s *Server) handleToolCall(name string, args json.RawMessage) (string, bool
 		if arguments.Symbol == "" {
 			return "Error: 'symbol' argument must be a non-empty string.", true
 		}
-
 		depth := 1
 		if arguments.Depth != nil {
 			depth = *arguments.Depth
 		}
-
-		result := s.engine.LocalizedContext(arguments.Symbol, depth)
-		data, err := json.MarshalIndent(result, "", "  ")
-		if err != nil {
-			return fmt.Sprintf("Error encoding result: %v", err), true
-		}
-		return string(data), false
+		result, err := s.engine.LocalizedContextWithOptions(arguments.Symbol, depth, query.PageOptions{Limit: arguments.Limit, Cursor: arguments.Cursor})
+		return encodeToolResult(result, err)
 
 	default:
 		return fmt.Sprintf("Error: unknown tool name: %s", name), true
 	}
+}
+
+func parsePageOptions(args json.RawMessage) (query.PageOptions, error) {
+	var arguments struct {
+		Limit  int    `json:"limit"`
+		Cursor string `json:"cursor"`
+	}
+	if len(args) > 0 {
+		if err := json.Unmarshal(args, &arguments); err != nil {
+			return query.PageOptions{}, fmt.Errorf("invalid pagination arguments")
+		}
+	}
+	if arguments.Limit < 0 {
+		return query.PageOptions{}, fmt.Errorf("limit must not be negative")
+	}
+	return query.PageOptions{Limit: arguments.Limit, Cursor: arguments.Cursor}, nil
+}
+
+func encodeToolResult(result interface{}, queryErr error) (string, bool) {
+	if queryErr != nil {
+		return fmt.Sprintf("Error: %v", queryErr), true
+	}
+	data, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return fmt.Sprintf("Error encoding result: %v", err), true
+	}
+	return string(data), false
 }
 
 // MCP Protocol Message Types

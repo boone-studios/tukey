@@ -170,6 +170,8 @@ Exposed MCP Tools:
 - `tukey_get_analysis_status` — Check whether source files are fresh, stale, or missing snapshot metadata.
 - `tukey_get_localized_context` (args: `symbol` string, `depth` int [optional]) — Retrieve a pruned context sub-graph (containing targets, dependencies, and dependents) around a symbol (ideal for AI context pruning).
 
+MCP responses are paginated with `limit` (default 50, maximum 100 per collection) and an optional opaque `cursor`. Follow `page.nextCursor` with the same query arguments until it is omitted. Localized context depth is capped at 5.
+
 ### 2. Tukey Command Line Skill
 You can also feed Tukey's compact query capabilities directly to LLMs as a CLI skill. For a detailed guide on CLI-based agent configurations, including circular dependency audits, performance benchmarking, and architectural layer checks, see [docs/tukey_skill.md](docs/tukey_skill.md).
 

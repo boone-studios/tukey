@@ -40,6 +40,7 @@ type QueryResult struct {
 	Results       []NodeResult      `json:"results"`
 	Resolution    *SymbolResolution `json:"resolution,omitempty"`
 	Relationships []EdgeResult      `json:"relationships,omitempty"`
+	Page          *PageInfo         `json:"page,omitempty"`
 }
 
 // DiagnosticsResult is the JSON envelope returned for analysis diagnostics.
@@ -47,6 +48,7 @@ type DiagnosticsResult struct {
 	Query   string                      `json:"query"`
 	Count   int                         `json:"count"`
 	Results []models.AnalysisDiagnostic `json:"results"`
+	Page    *PageInfo                   `json:"page,omitempty"`
 }
 
 // Engine queries a pre-built Tukey analysis file without re-running analysis
@@ -82,44 +84,85 @@ func (e *Engine) Graph() *models.DependencyGraph {
 	return e.graph
 }
 
-// Find returns all nodes whose name contains term (case-insensitive substring)
+// Find returns all nodes whose name contains term (case-insensitive substring).
 func (e *Engine) Find(term string) QueryResult {
-	// Try direct ID lookup first
-	if node, exists := e.graph.Nodes[term]; exists {
-		results := []NodeResult{nodeToResult(node)}
-		return QueryResult{Query: "find", Term: term, Count: 1, Results: results}
-	}
+	result, _ := e.FindWithOptions(term, PageOptions{Unbounded: true})
+	result.Page = nil
+	return result
+}
 
-	lower := strings.ToLower(term)
+// FindWithOptions returns a page of matching nodes.
+func (e *Engine) FindWithOptions(term string, options PageOptions) (QueryResult, error) {
+	offset, limit, err := resolvePage(options)
+	if err != nil {
+		return QueryResult{}, err
+	}
 	var results []NodeResult
-	for _, node := range e.graph.Nodes {
-		matched := false
-		for _, candidateName := range e.getNodeNames(node) {
-			if strings.Contains(strings.ToLower(candidateName), lower) {
-				matched = true
-				break
+	if node, exists := e.graph.Nodes[term]; exists {
+		results = []NodeResult{nodeToResult(node)}
+	} else {
+		lower := strings.ToLower(term)
+		for _, node := range e.graph.Nodes {
+			matched := false
+			for _, candidateName := range e.getNodeNames(node) {
+				if strings.Contains(strings.ToLower(candidateName), lower) {
+					matched = true
+					break
+				}
 			}
-		}
-		if matched {
-			results = append(results, nodeToResult(node))
+			if matched {
+				results = append(results, nodeToResult(node))
+			}
 		}
 	}
 	sortResults(results)
-	return QueryResult{Query: "find", Term: term, Count: len(results), Results: coalesce(results)}
+	total := len(results)
+	results, hasMore := pageSlice(results, offset, limit)
+	return QueryResult{
+		Query: "find", Term: term, Count: len(results), Results: coalesce(results),
+		Page: makePage(limit, offset, len(results), total, hasMore),
+	}, nil
 }
 
-// Orphans returns all nodes with no dependencies and no dependents (dead code candidates)
+// Orphans returns all nodes with no dependencies and no dependents (dead code candidates).
 func (e *Engine) Orphans() QueryResult {
+	result, _ := e.OrphansWithOptions(PageOptions{Unbounded: true})
+	result.Page = nil
+	return result
+}
+
+// OrphansWithOptions returns a page of dead-code candidates.
+func (e *Engine) OrphansWithOptions(options PageOptions) (QueryResult, error) {
+	offset, limit, err := resolvePage(options)
+	if err != nil {
+		return QueryResult{}, err
+	}
 	var results []NodeResult
 	for _, node := range e.graph.Orphans {
 		results = append(results, nodeToResult(node))
 	}
 	sortResults(results)
-	return QueryResult{Query: "orphans", Count: len(results), Results: coalesce(results)}
+	total := len(results)
+	results, hasMore := pageSlice(results, offset, limit)
+	return QueryResult{
+		Query: "orphans", Count: len(results), Results: coalesce(results),
+		Page: makePage(limit, offset, len(results), total, hasMore),
+	}, nil
 }
 
 // Diagnostics returns parser and resolution diagnostics for the loaded analysis.
 func (e *Engine) Diagnostics() DiagnosticsResult {
+	result, _ := e.DiagnosticsWithOptions(PageOptions{Unbounded: true})
+	result.Page = nil
+	return result
+}
+
+// DiagnosticsWithOptions returns a page of parser and resolution diagnostics.
+func (e *Engine) DiagnosticsWithOptions(options PageOptions) (DiagnosticsResult, error) {
+	offset, limit, err := resolvePage(options)
+	if err != nil {
+		return DiagnosticsResult{}, err
+	}
 	results := append([]models.AnalysisDiagnostic(nil), e.graph.Diagnostics...)
 	sort.Slice(results, func(i, j int) bool {
 		if results[i].File != results[j].File {
@@ -136,7 +179,12 @@ func (e *Engine) Diagnostics() DiagnosticsResult {
 	if results == nil {
 		results = []models.AnalysisDiagnostic{}
 	}
-	return DiagnosticsResult{Query: "diagnostics", Count: len(results), Results: results}
+	total := len(results)
+	results, hasMore := pageSlice(results, offset, limit)
+	return DiagnosticsResult{
+		Query: "diagnostics", Count: len(results), Results: results,
+		Page: makePage(limit, offset, len(results), total, hasMore),
+	}, nil
 }
 
 // getNodeNames returns all possible candidate names for a node to match against

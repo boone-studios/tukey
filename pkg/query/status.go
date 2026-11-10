@@ -27,10 +27,22 @@ type StatusResult struct {
 	ChangeCount   int            `json:"changeCount"`
 	Changes       []SourceChange `json:"changes"`
 	Message       string         `json:"message"`
+	Page          *PageInfo      `json:"page,omitempty"`
 }
 
 // Status compares the current source tree with the snapshot stored in the analysis.
 func (e *Engine) Status() (StatusResult, error) {
+	result, err := e.StatusWithOptions(PageOptions{Unbounded: true})
+	result.Page = nil
+	return result, err
+}
+
+// StatusWithOptions returns freshness status with a bounded page of changes.
+func (e *Engine) StatusWithOptions(options PageOptions) (StatusResult, error) {
+	offset, limit, err := resolvePage(options)
+	if err != nil {
+		return StatusResult{}, err
+	}
 	result := StatusResult{
 		Query:         "status",
 		Status:        "unknown",
@@ -41,6 +53,7 @@ func (e *Engine) Status() (StatusResult, error) {
 	}
 	if e.metadata.SchemaVersion == 0 || e.metadata.GeneratedAt == "" || e.metadata.RootPath == "" {
 		result.Message = "Analysis has no source snapshot; rebuild it to enable freshness checks"
+		result.Page = makePage(limit, offset, 0, 0, false)
 		return result, nil
 	}
 
@@ -93,5 +106,9 @@ func (e *Engine) Status() (StatusResult, error) {
 		result.Status = "fresh"
 		result.Message = "Analysis matches the current source files"
 	}
+	total := len(result.Changes)
+	var hasMore bool
+	result.Changes, hasMore = pageSlice(result.Changes, offset, limit)
+	result.Page = makePage(limit, offset, len(result.Changes), total, hasMore)
 	return result, nil
 }

@@ -605,6 +605,8 @@ Use the Tukey MCP tools to answer questions about this codebase's dependency str
 
 **When ` + "`resolution.ambiguous`" + ` is true**, repeat the query with a class-qualified name or exact node ID. Use ` + "`relationships`" + ` to trace each source-target pair.
 
+**MCP responses are paginated**. Use ` + "`limit`" + ` (default 50, maximum 100 per collection) and follow ` + "`page.nextCursor`" + ` with the same arguments. Localized context depth is capped at 5.
+
 **Before trusting graph results**, call ` + "`tukey_get_analysis_status`" + ` and ` + "`tukey_get_analysis_diagnostics`" + ` to check freshness and completeness.
 
 **If the analysis is stale**, rebuild it first:

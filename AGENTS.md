@@ -399,7 +399,8 @@ Symbol and diagnostic queries share the following JSON envelope:
 - `term` is omitted for `--orphans` and `--diagnostics`.
 - `namespace` and `className` are omitted when empty.
 - `refType`, `refLines`, and `refCount` are compatibility summaries; `relationships` preserves every matched source-target pair.
-- `resolution.matchType` is `id`, `exact`, `substring`, or `not_found`; `resolution.targets` is always an array for relationship queries.
+- `resolution.matchType` is `id`, `exact`, `substring`, or `not_found`; `resolution.targets` is always an array for relationship queries. `targetCount` preserves the total when targets are paginated.
+- MCP queries accept `limit` (50 by default, at most 100 per collection) and an opaque `cursor`; `page.nextCursor` resumes all collections at the next offset. Localized depth is capped at 5.
 - Diagnostic results contain `code`, `severity`, `file`, `message`, `count`, optional symbol/reference metadata, and up to 20 sampled lines.
 - `results` is always a JSON array (never `null`).
 - `--status` instead returns freshness state, snapshot metadata, checked/change counts, and added, modified, or deleted source paths. Legacy exports return `unknown`.
@@ -408,13 +409,15 @@ Symbol and diagnostic queries share the following JSON envelope:
 
 - **`pkg/query/query.go`** – `Engine`, symbol lookup, diagnostics, and analysis-file loading.
 - **`pkg/query/relationships.go`** – caller/dependency relationships and localized traversal with resolution metadata.
+- **`pkg/query/pagination.go`** – shared limits, opaque cursors, and page metadata for MCP-facing query variants.
 - **`pkg/query/status.go`** – source freshness comparison using the recorded snapshot and scanner settings.
-- **`pkg/query/*_test.go`** – synthetic graph, relationship, and filesystem-backed freshness tests.
+- **`pkg/query/*_test.go`** – synthetic graph, relationship, pagination, and filesystem-backed freshness tests.
 - **`cmd/tukey/query_cmd.go`** – CLI argument parsing (`parseQueryArgs`) and output encoding.
 - **`cmd/tukey/main.go`** – dispatches to `runQuery(os.Args[2:])` before the analysis path when `os.Args[1] == "query"`.
 
 Agents working on the query subcommand should follow the same conventions:
 - Keep `pkg/query` free of CLI concerns; all user-facing formatting belongs in `cmd/tukey/query_cmd.go`.
 - Graph queries depend only on `*models.DependencyGraph`; freshness checks additionally use metadata and the current source tree.
+- Existing query methods remain unbounded for compatibility; MCP handlers use the `WithOptions` variants with bounded pages.
 - Never change the output schema in a backwards‑incompatible way; downstream agents parse this JSON.
 

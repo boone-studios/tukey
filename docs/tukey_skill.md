@@ -187,8 +187,10 @@ tukey mcp tukey-results.json
 In addition to symbol search and caller tracing, the MCP server provides **`tukey_get_analysis_status`** for source freshness checks, **`tukey_get_analysis_diagnostics`** for parser and resolution warnings, and **`tukey_get_localized_context`** for dependency neighborhoods. Localized context uses breadth-first traversal up to a specified depth to gather the structural neighborhood around a target symbol, helping agents focus on relevant interfaces and dependents before editing.
 
 #### Tool Parameters:
-* `symbol` (string, required): The target symbol name, namespace, or exact node ID.
-* `depth` (integer, optional): The traversal depth boundary (defaults to `1`).
+* `symbol` (string, required for symbol tools): The target symbol name, namespace, or exact node ID.
+* `depth` (integer, localized context only): Traversal depth (default `1`, maximum `5`).
+* `limit` (integer, optional): Maximum items per collection (default `50`, maximum `100`).
+* `cursor` (string, optional): Opaque continuation cursor from `page.nextCursor`.
 
 #### JSON Output Format:
 ```json
@@ -238,6 +240,8 @@ In addition to symbol search and caller tracing, the MCP server provides **`tuke
   ]
 }
 ```
+
+Paginated MCP responses include `page.limit`, `page.returned`, `page.total`, and optional `page.nextCursor`. Limits apply independently to each returned collection. To continue, repeat the same query and arguments with `cursor` set to `nextCursor`; stop when it is omitted.
 
 ---
 

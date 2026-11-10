@@ -10,9 +10,10 @@ import (
 )
 
 type SymbolResolution struct {
-	MatchType string       `json:"matchType"`
-	Ambiguous bool         `json:"ambiguous"`
-	Targets   []NodeResult `json:"targets"`
+	MatchType   string       `json:"matchType"`
+	Ambiguous   bool         `json:"ambiguous"`
+	TargetCount int          `json:"targetCount"`
+	Targets     []NodeResult `json:"targets"`
 }
 
 type EdgeResult struct {
@@ -32,6 +33,7 @@ type LocalizedContextResult struct {
 	Dependencies  []NodeResult     `json:"dependencies"`
 	Dependents    []NodeResult     `json:"dependents"`
 	Relationships []EdgeResult     `json:"relationships"`
+	Page          *PageInfo        `json:"page,omitempty"`
 }
 
 func newSymbolResolution(targets []*models.DependencyNode, matchType string) SymbolResolution {
@@ -41,9 +43,10 @@ func newSymbolResolution(targets []*models.DependencyNode, matchType string) Sym
 	}
 	sortResults(results)
 	return SymbolResolution{
-		MatchType: matchType,
-		Ambiguous: len(targets) > 1,
-		Targets:   results,
+		MatchType:   matchType,
+		Ambiguous:   len(targets) > 1,
+		TargetCount: len(targets),
+		Targets:     results,
 	}
 }
 
@@ -73,8 +76,40 @@ func sortEdges(edges []EdgeResult) {
 	})
 }
 
+func paginateRelationships(result QueryResult, options PageOptions) (QueryResult, error) {
+	offset, limit, err := resolvePage(options)
+	if err != nil {
+		return QueryResult{}, err
+	}
+	total := len(result.Results) + len(result.Relationships)
+	if result.Resolution != nil {
+		total += len(result.Resolution.Targets)
+	}
+
+	var moreNodes, moreTargets, moreEdges bool
+	result.Results, moreNodes = pageSlice(result.Results, offset, limit)
+	result.Relationships, moreEdges = pageSlice(result.Relationships, offset, limit)
+	if result.Resolution != nil {
+		result.Resolution.Targets, moreTargets = pageSlice(result.Resolution.Targets, offset, limit)
+	}
+	result.Count = len(result.Results)
+	returned := len(result.Results) + len(result.Relationships)
+	if result.Resolution != nil {
+		returned += len(result.Resolution.Targets)
+	}
+	result.Page = makePage(limit, offset, returned, total, moreNodes || moreTargets || moreEdges)
+	return result, nil
+}
+
 // Callers returns incoming nodes plus one relationship record per matched target.
 func (e *Engine) Callers(term string) QueryResult {
+	result, _ := e.CallersWithOptions(term, PageOptions{Unbounded: true})
+	result.Page = nil
+	return result
+}
+
+// CallersWithOptions returns a bounded page of incoming nodes and relationships.
+func (e *Engine) CallersWithOptions(term string, options PageOptions) (QueryResult, error) {
 	targets, matchType := e.findNodesWithResolution(term)
 	resolution := newSymbolResolution(targets, matchType)
 	seen := make(map[string]bool)
@@ -100,14 +135,21 @@ func (e *Engine) Callers(term string) QueryResult {
 	}
 	sortResults(results)
 	sortEdges(relationships)
-	return QueryResult{
-		Query: "callers", Term: term, Count: len(results), Results: coalesce(results),
+	return paginateRelationships(QueryResult{
+		Query: "callers", Term: term, Results: coalesce(results),
 		Resolution: &resolution, Relationships: relationships,
-	}
+	}, options)
 }
 
 // Dependents returns outgoing nodes plus one relationship record per matched target.
 func (e *Engine) Dependents(term string) QueryResult {
+	result, _ := e.DependentsWithOptions(term, PageOptions{Unbounded: true})
+	result.Page = nil
+	return result
+}
+
+// DependentsWithOptions returns a bounded page of outgoing nodes and relationships.
+func (e *Engine) DependentsWithOptions(term string, options PageOptions) (QueryResult, error) {
 	targets, matchType := e.findNodesWithResolution(term)
 	resolution := newSymbolResolution(targets, matchType)
 	seen := make(map[string]bool)
@@ -133,16 +175,30 @@ func (e *Engine) Dependents(term string) QueryResult {
 	}
 	sortResults(results)
 	sortEdges(relationships)
-	return QueryResult{
-		Query: "dependents", Term: term, Count: len(results), Results: coalesce(results),
+	return paginateRelationships(QueryResult{
+		Query: "dependents", Term: term, Results: coalesce(results),
 		Resolution: &resolution, Relationships: relationships,
-	}
+	}, options)
 }
 
 // LocalizedContext finds dependencies and dependents up to a certain depth around a symbol.
 func (e *Engine) LocalizedContext(term string, maxDepth int) LocalizedContextResult {
+	result, _ := e.LocalizedContextWithOptions(term, maxDepth, PageOptions{Unbounded: true})
+	result.Page = nil
+	return result
+}
+
+// LocalizedContextWithOptions returns a bounded page of a symbol's graph neighborhood.
+func (e *Engine) LocalizedContextWithOptions(term string, maxDepth int, options PageOptions) (LocalizedContextResult, error) {
+	offset, limit, err := resolvePage(options)
+	if err != nil {
+		return LocalizedContextResult{}, err
+	}
 	if maxDepth < 1 {
 		maxDepth = 1
+	}
+	if maxDepth > MaxContextDepth {
+		maxDepth = MaxContextDepth
 	}
 
 	targets, matchType := e.findNodesWithResolution(term)
@@ -156,7 +212,7 @@ func (e *Engine) LocalizedContext(term string, maxDepth int) LocalizedContextRes
 		Relationships: []EdgeResult{},
 	}
 	if len(targets) == 0 {
-		return res
+		return paginateLocalized(res, offset, limit), nil
 	}
 
 	targetIDs := make(map[string]bool)
@@ -244,5 +300,18 @@ func (e *Engine) LocalizedContext(term string, maxDepth int) LocalizedContextRes
 	sortResults(res.Dependencies)
 	sortResults(res.Dependents)
 	sortEdges(res.Relationships)
-	return res
+	return paginateLocalized(res, offset, limit), nil
+}
+
+func paginateLocalized(result LocalizedContextResult, offset, limit int) LocalizedContextResult {
+	total := len(result.TargetNodes) + len(result.Dependencies) + len(result.Dependents) + len(result.Relationships)
+	var moreTargets, moreDependencies, moreDependents, moreRelationships bool
+	result.TargetNodes, moreTargets = pageSlice(result.TargetNodes, offset, limit)
+	result.Dependencies, moreDependencies = pageSlice(result.Dependencies, offset, limit)
+	result.Dependents, moreDependents = pageSlice(result.Dependents, offset, limit)
+	result.Relationships, moreRelationships = pageSlice(result.Relationships, offset, limit)
+	result.Resolution.Targets = result.TargetNodes
+	returned := len(result.TargetNodes) + len(result.Dependencies) + len(result.Dependents) + len(result.Relationships)
+	result.Page = makePage(limit, offset, returned, total, moreTargets || moreDependencies || moreDependents || moreRelationships)
+	return result
 }
