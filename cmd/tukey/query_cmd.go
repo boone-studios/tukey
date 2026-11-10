@@ -190,10 +190,11 @@ OUTPUT:
     All queries emit a JSON object to stdout:
     {
       "query":   "<mode>",
-      "term":    "<search term>",      // omitted for --orphans and --diagnostics
+      "term":    "<search term>",      // omitted for --orphans, --diagnostics, and --status
       "count":   <int>,
       "results": [ ... ]
     }
+    --status instead returns query, status, checkedFiles, changeCount, and changes.
 
     Symbol results include: id, name, type, file, line, score,
     dependencyCount, dependentCount. Callers and --dependents results
