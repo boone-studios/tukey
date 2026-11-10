@@ -239,7 +239,10 @@ func sortResults(results []NodeResult) {
 		if results[i].File != results[j].File {
 			return results[i].File < results[j].File
 		}
-		return results[i].Line < results[j].Line
+		if results[i].Line != results[j].Line {
+			return results[i].Line < results[j].Line
+		}
+		return results[i].ID < results[j].ID
 	})
 }
 

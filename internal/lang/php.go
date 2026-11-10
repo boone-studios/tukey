@@ -74,7 +74,7 @@ func NewPHPParser() *PHPParser {
 		staticCallPattern: regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)::(\$?[A-Za-z_][A-Za-z0-9_]*)`),
 
 		// Method calls: $user->getName(), $this->property
-		methodCallPattern: regexp.MustCompile(`\$[A-Za-z_][A-Za-z0-9_]*->(\$?[A-Za-z_][A-Za-z0-9_]*)`),
+		methodCallPattern: regexp.MustCompile(`(\$[A-Za-z_][A-Za-z0-9_]*)->(\$?[A-Za-z_][A-Za-z0-9_]*)`),
 
 		// New instances: new User(), new \App\Models\User()
 		newInstancePattern: regexp.MustCompile(`new\s+([A-Za-z_\\][A-Za-z0-9_\\]*)`),
@@ -96,10 +96,11 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 	defer file.Close()
 
 	parsed := &models.ParsedFile{
-		Path:     filePath,
-		Elements: []models.CodeElement{},
-		Usage:    []models.UsageElement{},
-		Uses:     []string{},
+		Path:          filePath,
+		Elements:      []models.CodeElement{},
+		Usage:         []models.UsageElement{},
+		Uses:          []string{},
+		ImportAliases: make(map[string]string),
 	}
 
 	scanner := bufio.NewScanner(file)
@@ -152,7 +153,7 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 		// Parse use statements (only at top-level, outside classes/interfaces/traits/enums)
 		if inClass == "" {
 			if matches := p.usePattern.FindStringSubmatch(line); matches != nil {
-				parsed.Uses = append(parsed.Uses, matches[1])
+				recordPHPImport(parsed, matches[1], matches[2])
 			} else if strings.HasPrefix(trimmedLine, "use ") && strings.Contains(trimmedLine, "{") && strings.Contains(trimmedLine, "}") && strings.HasSuffix(trimmedLine, ";") {
 				// Group use statement: e.g. use App\Models\{User, Order, Payment};
 				code := trimmedLine[4 : len(trimmedLine)-1] // e.g. "App\Models\{User, Order, Payment}"
@@ -170,11 +171,12 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 						if part == "" {
 							continue
 						}
-						// Handle aliases in group use: e.g. "Order as ClientOrder"
+						alias := ""
 						if idx := strings.Index(strings.ToLower(part), " as "); idx != -1 {
+							alias = strings.TrimSpace(part[idx+4:])
 							part = strings.TrimSpace(part[:idx])
 						}
-						parsed.Uses = append(parsed.Uses, prefix+part)
+						recordPHPImport(parsed, prefix+part, alias)
 					}
 				}
 			}
@@ -428,9 +430,13 @@ func (p *PHPParser) parseUsage(line string, lineNum int, inFunction, inClass str
 	methodMatches := p.methodCallPattern.FindAllStringSubmatch(line, -1)
 	for i := 0; i < len(methodMatches); i++ {
 		match := methodMatches[i]
+		name := match[2]
+		if match[1] == "$this" && inClass != "" {
+			name = inClass + "::" + name
+		}
 		usage := models.UsageElement{
 			Type:    "method_call",
-			Name:    match[1],
+			Name:    name,
 			Context: context,
 			Line:    lineNum,
 		}
@@ -530,6 +536,15 @@ func (p *PHPParser) isBuiltinFunction(funcName string) bool {
 	}
 
 	return builtins[strings.ToLower(funcName)]
+}
+
+func recordPHPImport(parsed *models.ParsedFile, importPath, alias string) {
+	parsed.Uses = append(parsed.Uses, importPath)
+	if alias == "" {
+		parts := strings.Split(strings.Trim(importPath, "\\"), "\\")
+		alias = parts[len(parts)-1]
+	}
+	parsed.ImportAliases[alias] = importPath
 }
 
 // parseParameters extracts parameter names from function signature

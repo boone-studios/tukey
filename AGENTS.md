@@ -58,7 +58,7 @@ At a high level:
   - `DependencyTracker` turns `ParsedFile` data into a `DependencyGraph`.  
   - Responsibilities:  
     - Create graph nodes for each `CodeElement`.  
-    - Maintain indexes (`nodeIndex`, `namespaceMap`) so usages can be resolved to targets.  
+    - Maintain qualified-name, short-name, and source-context indexes so usages can be resolved to unambiguous targets.
     - Build directed edges for calls, instantiations, and imports.  
     - Compute **complexity scores**, discover **orphans**, and identify **hotspots**.  
   - Does **not** own user‑facing formatting; it should stay data‑oriented.
@@ -183,21 +183,20 @@ When extending PHP support (e.g., better generics, traits, or more nuanced metho
 `DependencyTracker` converts parsed elements and usage into a scored graph:
 
 - **Node creation and indexing (`createNodes`)**
-  - For each `CodeElement` in all `ParsedFile`s, it creates a `DependencyNode` with ID:  
-    - `"<type>:<fullyQualifiedName>:<lineNumber>"` (e.g. `class:App\\Models\\User:8`).  
-  - Fills: `Name`, `Type`, `File`, `Namespace`, `ClassName`, `Line`, empty `Dependencies` and `Dependents`.  
+  - For each `CodeElement` in all `ParsedFile`s, it creates a `DependencyNode` with a line-independent ID from `models.StableSymbolID`:
+    - `"<type>:<fullyQualifiedName>"` (e.g. `class:App\\Models\\User`).
+    - Members include their owner (e.g. `method:App\\Models\\User::save`).
+    - Legitimate duplicate declarations receive deterministic `#2`, `#3`, etc. suffixes after files are sorted by path.
+  - Fills: `Name`, `Type`, `File`, `Namespace`, `ClassName`, `Line`, empty `Dependencies` and `Dependents`.
   - Computes a **base complexity score** via `calculateComplexityScore`:
-    - `class`: base 5, +2 if abstract.  
-    - `method` / `function`: base 3, +1 per parameter, +1 if static, +2 if abstract.  
+    - `class`: base 5, +2 if abstract.
+    - `method` / `function`: base 3, +1 per parameter, +1 if static, +2 if abstract.
     - `property`: base 2, +1 if static.
-  - Maintains several indexes:  
-    - `nodeIndex[fullName] = nodeID` (always).  
-    - `nodeIndex[shortName] = nodeID` when unambiguous; removed on conflicts.  
-    - `namespaceMap[classShortName] = fullName` for disambiguation.
+  - Maintains candidate indexes for qualified names, short names, and source contexts. Ambiguous candidates are retained so resolution can reject them instead of selecting an arbitrary node.
 
 - **Relationship building (`buildRelationships`)**
-  - For each `ParsedFile`:  
-    - `processFileUsage` iterates `UsageElement`s, looks up a **source node** by matching `usage.Context` to node name or class name in the same file, and resolves **target nodes** via `findTargetNode`.  
+  - For each `ParsedFile`:
+    - `processFileUsage` iterates `UsageElement`s, looks up a unique **source node** in the same file, and resolves targets via `findTargetNode` using imports, current namespace, qualified names, and usage type. Ambiguous targets do not create edges.
     - `processImports` adds `"imports"`‑type edges from classes to imported items if they exist in `nodeIndex`.
   - `addDependencyRef` updates both `source.Dependencies` and `target.Dependents` with counts and line information, and increments `TotalEdges`. Self‑dependencies are ignored.
 
@@ -356,7 +355,7 @@ For `--find`, `--callers`, and `--dependents`, the query engine is highly resili
 - **Namespaced Short Name**: The namespace plus the short name (e.g., `App\Factories\GatewayFactory` or `App\Services\pay`).
 - **Class-Scoped Member Name**: The class name and member (e.g., `PaymentService::pay`).
 - **Fully-Qualified Member Name**: The full namespace, class, and member (e.g., `App\Services\PaymentService::pay`).
-- **Exact Node ID**: The unique stable identifier (e.g., `class:App\Services\PaymentService:5` or `method:App\Services\PaymentService\pay:30`), which resolves in $O(1)$ time.
+- **Exact Node ID**: The unique stable identifier (e.g., `class:App\Services\PaymentService` or `method:App\Services\PaymentService::pay`), which resolves in $O(1)$ time.
 
 For `--callers` and `--dependents`, an exact match is preferred using the same candidate resolution, falling back to partial matches if no exact match is found. When multiple nodes match the term (e.g., a method name shared across multiple classes), results are merged across all matches.
 
@@ -371,7 +370,7 @@ Every query returns the same JSON envelope:
   "count":   42,
   "results": [
     {
-      "id":              "class:App\\Factories\\GatewayFactory:15",
+      "id":              "class:App\\Factories\\GatewayFactory",
       "name":            "GatewayFactory",
       "type":            "class",
       "file":            "/abs/path/to/GatewayFactory.php",

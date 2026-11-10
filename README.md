@@ -228,8 +228,8 @@ Identify refactoring opportunities:
 ```json
 {
   "nodes": {
-    "class:App\\Models\\User:8": {
-      "id": "class:App\\Models\\User:8",
+    "class:App\\Models\\User": {
+      "id": "class:App\\Models\\User",
       "name": "User",
       "type": "class",
       "file": "/app/Models/User.php",

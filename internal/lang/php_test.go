@@ -74,6 +74,32 @@ abstract class User {
 	}
 }
 
+func TestPHPParser_QualifiesThisReferences(t *testing.T) {
+	tmp := t.TempDir()
+	code := `<?php
+class Wallet {
+    private $balance;
+    public function save() {
+        $this->balance = 10;
+        $this->persist();
+    }
+}
+`
+	path := writePHP(t, tmp, "Wallet.php", code)
+
+	parsed, err := NewPHPParser().ParseFile(path)
+	if err != nil {
+		t.Fatalf("ParseFile error: %v", err)
+	}
+	found := make(map[string]bool)
+	for _, usage := range parsed.Usage {
+		found[usage.Name] = true
+	}
+	if !found["Wallet::balance"] || !found["Wallet::persist"] {
+		t.Fatalf("expected $this references to include class scope, got %+v", parsed.Usage)
+	}
+}
+
 func TestPHPParser_FunctionAndUsage(t *testing.T) {
 	tmp := t.TempDir()
 	code := `<?php
@@ -114,6 +140,31 @@ format_phone("123");
 	if !(fn && usageNew && usageMethod && usageFunc) {
 		t.Errorf("expected fn=%v new=%v method=%v func=%v",
 			fn, usageNew, usageMethod, usageFunc)
+	}
+}
+
+func TestPHPParser_ImportAliases(t *testing.T) {
+	tmp := t.TempDir()
+	code := `<?php
+namespace App\Http;
+use Vendor\Billing\Invoice as BillableInvoice;
+use App\Services\{Mailer, PaymentService as Pay};
+`
+	path := writePHP(t, tmp, "Controller.php", code)
+
+	parsed, err := NewPHPParser().ParseFile(path)
+	if err != nil {
+		t.Fatalf("ParseFile error: %v", err)
+	}
+	aliases := map[string]string{
+		"BillableInvoice": "Vendor\\Billing\\Invoice",
+		"Mailer":          "App\\Services\\Mailer",
+		"Pay":             "App\\Services\\PaymentService",
+	}
+	for alias, expected := range aliases {
+		if got := parsed.ImportAliases[alias]; got != expected {
+			t.Errorf("alias %s: got %q, want %q", alias, got, expected)
+		}
 	}
 }
 

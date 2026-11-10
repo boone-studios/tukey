@@ -7,6 +7,18 @@ package models
 
 import "sync"
 
+// StableSymbolID returns a line-independent identifier for a code element.
+func StableSymbolID(elementType, namespace, className, name string) string {
+	qualifiedName := name
+	if className != "" {
+		qualifiedName = className + "::" + name
+	}
+	if namespace != "" {
+		qualifiedName = namespace + "\\" + qualifiedName
+	}
+	return elementType + ":" + qualifiedName
+}
+
 // FileInfo holds information about discovered PHP files
 type FileInfo struct {
 	Path         string
@@ -31,11 +43,12 @@ type CodeElement struct {
 
 // ParsedFile contains all elements found in a PHP file
 type ParsedFile struct {
-	Path      string
-	Namespace string
-	Uses      []string       // Import statements
-	Elements  []CodeElement  // All defined elements
-	Usage     []UsageElement // References to other elements
+	Path          string
+	Namespace     string
+	Uses          []string          // Import statements
+	ImportAliases map[string]string // Local import names to fully-qualified paths
+	Elements      []CodeElement     // All defined elements
+	Usage         []UsageElement    // References to other elements
 }
 
 // UsageElement represents usage of external code elements

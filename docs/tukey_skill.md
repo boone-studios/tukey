@@ -77,7 +77,7 @@ tukey query [FLAG] <term> tukey-results.json
 
 #### Target Symbol Formats Supported:
 Tukey's query engine is highly resilient and supports matching a symbol in several ways:
-1. **Exact Node ID**: `class:App\Services\PaymentService:5` or `method:App\Services\PaymentService\pay:30` (Fastest $O(1)$ resolution).
+1. **Exact Node ID**: `class:App\Services\PaymentService` or `method:App\Services\PaymentService::pay` (Fastest $O(1)$ resolution).
 2. **Fully-Qualified Member**: `App\Services\PaymentService::pay`
 3. **Class-Scoped Member**: `PaymentService::pay`
 4. **Namespaced Short Name**: `App\Services\PaymentService`
@@ -95,7 +95,7 @@ Every `tukey query` returns a predictable JSON structure:
   "count": 1,
   "results": [
     {
-      "id": "class:App\\Services\\PaymentService:5",
+      "id": "class:App\\Services\\PaymentService",
       "name": "PaymentService",
       "type": "class",
       "file": "app/Services/PaymentService.php",
@@ -188,7 +188,7 @@ In addition to symbol search and caller tracing, the MCP server provides the **`
   "symbol": "PaymentService",
   "targets": [
     {
-      "id": "class:App\\Services\\PaymentService:10",
+      "id": "class:App\\Services\\PaymentService",
       "name": "PaymentService",
       "type": "class",
       "file": "app/Services/PaymentService.php",
@@ -200,7 +200,7 @@ In addition to symbol search and caller tracing, the MCP server provides the **`
   ],
   "dependencies": [
     {
-      "id": "class:App\\Gateways\\StripeGateway:5",
+      "id": "class:App\\Gateways\\StripeGateway",
       "name": "StripeGateway",
       "type": "class",
       "file": "app/Gateways/StripeGateway.php",
@@ -215,7 +215,7 @@ In addition to symbol search and caller tracing, the MCP server provides the **`
   ],
   "dependents": [
     {
-      "id": "class:App\\Http\\Controllers\\CheckoutController:15",
+      "id": "class:App\\Http\\Controllers\\CheckoutController",
       "name": "CheckoutController",
       "type": "class",
       "file": "app/Http/Controllers/CheckoutController.php",
