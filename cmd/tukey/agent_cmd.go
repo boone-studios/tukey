@@ -30,16 +30,18 @@ const (
 
 // AgentInfo holds metadata and configuration directory paths for a target agent.
 type AgentInfo struct {
-	Name           string
-	Key            string
-	Aliases        []string
-	Description    string
-	GlobalDir      string // relative to user home directory
-	ProjectDir     string // relative to project root
-	SettingsFile   string // config file name (e.g. settings.json, mcp_config.json)
-	ConfigFormat   agentConfigFormat
-	NeedsSkillFile bool
-	SkillFile      string // relative to the agent settings base directory
+	Name             string
+	Key              string
+	Aliases          []string
+	Description      string
+	GlobalDir        string // relative to user home directory
+	ProjectDir       string // relative to project root
+	SettingsFile     string // config file name (e.g. settings.json, mcp_config.json)
+	ConfigFormat     agentConfigFormat
+	NeedsSkillFile   bool
+	SkillFile        string // relative to the skill base directory
+	ProjectSkillBase string // optional project-root-relative override
+	GlobalSkillBase  string // optional home-relative override
 }
 
 // ResolveGlobalDir returns the absolute path to the global settings folder for this agent.
@@ -62,7 +64,7 @@ var supportedAgents = []AgentInfo{
 		SettingsFile:   "settings.json",
 		ConfigFormat:   agentConfigJSON,
 		NeedsSkillFile: true,
-		SkillFile:      filepath.Join("skills", "tukey.md"),
+		SkillFile:      filepath.Join("skills", "tukey", "SKILL.md"),
 	},
 	{
 		Name:           "Antigravity",
@@ -73,19 +75,22 @@ var supportedAgents = []AgentInfo{
 		ProjectDir:     ".agents",
 		SettingsFile:   "mcp_config.json",
 		ConfigFormat:   agentConfigJSON,
-		NeedsSkillFile: false,
-	},
-	{
-		Name:           "Codex",
-		Key:            "codex",
-		Aliases:        []string{"openai"},
-		Description:    "Configure for Codex (.codex/config.toml)",
-		GlobalDir:      ".codex",
-		ProjectDir:     ".codex",
-		SettingsFile:   "config.toml",
-		ConfigFormat:   agentConfigTOML,
 		NeedsSkillFile: true,
 		SkillFile:      filepath.Join("skills", "tukey", "SKILL.md"),
+	},
+	{
+		Name:             "Codex",
+		Key:              "codex",
+		Aliases:          []string{"openai"},
+		Description:      "Configure for Codex (.codex/config.toml)",
+		GlobalDir:        ".codex",
+		ProjectDir:       ".codex",
+		SettingsFile:     "config.toml",
+		ConfigFormat:     agentConfigTOML,
+		NeedsSkillFile:   true,
+		SkillFile:        filepath.Join("skills", "tukey", "SKILL.md"),
+		ProjectSkillBase: ".agents",
+		GlobalSkillBase:  ".agents",
 	},
 	{
 		Name:           "Cursor",
@@ -93,6 +98,18 @@ var supportedAgents = []AgentInfo{
 		Description:    "Configure for Cursor (.cursor/mcp.json)",
 		GlobalDir:      ".cursor",
 		ProjectDir:     ".cursor",
+		SettingsFile:   "mcp.json",
+		ConfigFormat:   agentConfigJSON,
+		NeedsSkillFile: true,
+		SkillFile:      filepath.Join("skills", "tukey", "SKILL.md"),
+	},
+	{
+		Name:           "Kimi Code",
+		Key:            "kimi",
+		Aliases:        []string{"kimi-code"},
+		Description:    "Configure for Kimi Code (.kimi-code/mcp.json)",
+		GlobalDir:      ".kimi-code",
+		ProjectDir:     ".kimi-code",
 		SettingsFile:   "mcp.json",
 		ConfigFormat:   agentConfigJSON,
 		NeedsSkillFile: true,
@@ -272,12 +289,8 @@ func runAgent(args []string) {
 
 	// ── Step 5: write skill file (if required by agent) ─────────────────────
 	if selectedAgent.NeedsSkillFile {
-		skillPath := filepath.Join(settingsBase, selectedAgent.SkillFile)
-		if err := os.MkdirAll(filepath.Dir(skillPath), 0755); err != nil {
-			fmt.Fprintf(os.Stderr, "❌ Could not create skills directory: %v\n", err)
-			os.Exit(1)
-		}
-		if err := os.WriteFile(skillPath, []byte(tukeySkillContent), 0644); err != nil {
+		skillPath, err := installAgentSkill(selectedAgent, cwd, settingsBase, isGlobal)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "❌ Failed to write skill file: %v\n", err)
 			os.Exit(1)
 		}
@@ -301,6 +314,28 @@ func runAgent(args []string) {
 	fmt.Println("   • tukey_get_analysis_diagnostics — inspect analysis completeness")
 	fmt.Println("   • tukey_get_analysis_status — check source freshness")
 	fmt.Println("   • tukey_get_localized_context — dependency subgraph around a symbol")
+}
+
+func installAgentSkill(agent AgentInfo, projectRoot, settingsBase string, isGlobal bool) (string, error) {
+	skillBase := settingsBase
+	if isGlobal && agent.GlobalSkillBase != "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		skillBase = filepath.Join(home, agent.GlobalSkillBase)
+	} else if !isGlobal && agent.ProjectSkillBase != "" {
+		skillBase = filepath.Join(projectRoot, agent.ProjectSkillBase)
+	}
+
+	skillPath := filepath.Join(skillBase, agent.SkillFile)
+	if err := os.MkdirAll(filepath.Dir(skillPath), 0755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(skillPath, []byte(tukeySkillContent), 0644); err != nil {
+		return "", err
+	}
+	return skillPath, nil
 }
 
 // detectAnalysisFilePath returns the absolute path to the analysis output file,
@@ -577,6 +612,7 @@ EXAMPLES:
     tukey agent --agent antigravity --yes
     tukey agent --agent codex
     tukey agent --agent cursor
+    tukey agent --agent kimi
 `, strings.Join(names, ", "), supportedAgents[0].Key, supportedAgents[0].Name)
 }
 
