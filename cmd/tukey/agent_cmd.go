@@ -299,6 +299,7 @@ func runAgent(args []string) {
 	fmt.Println("   • tukey_get_dependents      — show what a symbol depends on")
 	fmt.Println("   • tukey_find_orphans        — list dead code candidates")
 	fmt.Println("   • tukey_get_analysis_diagnostics — inspect analysis completeness")
+	fmt.Println("   • tukey_get_analysis_status — check source freshness")
 	fmt.Println("   • tukey_get_localized_context — dependency subgraph around a symbol")
 }
 
@@ -599,11 +600,12 @@ Use the Tukey MCP tools to answer questions about this codebase's dependency str
 - ` + "`tukey_get_dependents`" + ` — show what a symbol depends on (outgoing edges)
 - ` + "`tukey_find_orphans`" + ` — list dead code candidates (zero callers and zero dependencies)
 - ` + "`tukey_get_analysis_diagnostics`" + ` — inspect parser errors and unresolved or ambiguous references
+- ` + "`tukey_get_analysis_status`" + ` — check whether source files match the analysis snapshot
 - ` + "`tukey_get_localized_context`" + ` — get a dependency subgraph around a symbol
 
-**Before trusting empty results or dead-code candidates**, call ` + "`tukey_get_analysis_diagnostics`" + ` to check analysis completeness.
+**Before trusting graph results**, call ` + "`tukey_get_analysis_status`" + ` and ` + "`tukey_get_analysis_diagnostics`" + ` to check freshness and completeness.
 
-**If the analysis seems stale**, rebuild it first:
+**If the analysis is stale**, rebuild it first:
 
 ` + "```" + `
 tukey -o tukey-results.json .

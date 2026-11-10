@@ -75,6 +75,7 @@ tukey query [FLAG] <term> tukey-results.json
 | `--dependents <term>` | All nodes that the named symbol directly depends on (outgoing edges). | Short names, class-scoped members, FQDNs, or exact IDs. |
 | `--orphans` | All dead-code candidates (zero dependencies and zero dependents). | None (lists all matching elements in the graph). |
 | `--diagnostics` | Parser errors and unresolved or ambiguous references, aggregated by file and symbol. | None. |
+| `--status` | Freshness status and added, modified, or deleted source files. | None. |
 
 #### Target Symbol Formats Supported:
 Tukey's query engine is highly resilient and supports matching a symbol in several ways:
@@ -118,6 +119,8 @@ Every `tukey query` returns a predictable JSON envelope. Symbol queries contain 
 * `refType`, `refLines`, and `refCount` are populated for `--callers` and `--dependents` queries to show exactly *how* and *where* (line numbers) the connection occurs.
 
 `--diagnostics` results instead contain `code`, `severity`, `file`, `message`, `count`, optional `symbol` and `referenceType`, and up to 20 sampled `lines`. The envelope's `count` is the number of diagnostic groups; each result's `count` is the number of occurrences in that group. Codes are `parse_error`, `unresolved_source`, `unresolved_reference`, and `ambiguous_reference`.
+
+`--status` returns `status` (`fresh`, `stale`, or `unknown`), snapshot metadata, `checkedFiles`, `changeCount`, and a `changes` array whose entries contain `path` and `change` (`added`, `modified`, or `deleted`). Older exports without source metadata return `unknown`.
 
 ---
 
@@ -179,7 +182,7 @@ For AI agent environments, Tukey supports the Model Context Protocol (MCP) serve
 tukey mcp tukey-results.json
 ```
 
-In addition to symbol search and caller tracing, the MCP server provides **`tukey_get_analysis_diagnostics`** for checking parser and resolution warnings, and **`tukey_get_localized_context`** for dependency neighborhoods. Localized context uses breadth-first traversal up to a specified depth to gather the structural neighborhood around a target symbol, helping agents focus on relevant interfaces and dependents before editing.
+In addition to symbol search and caller tracing, the MCP server provides **`tukey_get_analysis_status`** for source freshness checks, **`tukey_get_analysis_diagnostics`** for parser and resolution warnings, and **`tukey_get_localized_context`** for dependency neighborhoods. Localized context uses breadth-first traversal up to a specified depth to gather the structural neighborhood around a target symbol, helping agents focus on relevant interfaces and dependents before editing.
 
 #### Tool Parameters:
 * `symbol` (string, required): The target symbol name, namespace, or exact node ID.
@@ -238,10 +241,10 @@ In addition to symbol search and caller tracing, the MCP server provides **`tuke
 
 ## 🤖 Agent Best Practices & Token-Saving Tips
 
-* **Step 1: Check for existing graphs**:
-  When you land in a project, check if `tukey-results.json` already exists. If it does, do NOT re-run the full analysis. Go straight to Step 3.
-* **Step 2: Run a fast analysis**:
-  If no graph exists, run `tukey -l php,js -o tukey-results.json .` in the background.
+* **Step 1: Check graph freshness**:
+  When a graph exists, run `tukey query --status` or call `tukey_get_analysis_status`. Continue only when it is `fresh`; `unknown` means the export lacks source metadata.
+* **Step 2: Run a fast analysis when needed**:
+  If no graph exists or it is stale, run `tukey -l php,js -o tukey-results.json .` in the background.
 * **Step 3: Check analysis completeness**:
   Run `tukey query --diagnostics` or call `tukey_get_analysis_diagnostics`. Treat empty graph results cautiously when parser errors or unresolved references are present.
 * **Step 4: Prune your context via MCP Localized Context**:

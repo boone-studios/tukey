@@ -6,6 +6,7 @@ package output
 import (
 	"encoding/json"
 	"os"
+	"time"
 
 	"github.com/boone-studios/tukey/internal/models"
 )
@@ -20,21 +21,46 @@ func NewJSONExporter() *JSONExporter {
 
 // Export exports the analysis results to a JSON file
 func (je *JSONExporter) Export(result *models.AnalysisResult, filename string) error {
-	// Create the export data structure
+	metadata := result.Metadata
+	if metadata.SchemaVersion == 0 {
+		metadata.SchemaVersion = models.AnalysisSchemaVersion
+	}
+	if metadata.Generator.Name == "" {
+		metadata.Generator.Name = "tukey"
+	}
+	if metadata.Generator.Version == "" {
+		metadata.Generator.Version = "unknown"
+	}
+	if metadata.GeneratedAt == "" {
+		metadata.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	if metadata.Languages == nil {
+		metadata.Languages = []string{}
+	}
+	if metadata.ExcludeDirs == nil {
+		metadata.ExcludeDirs = []string{}
+	}
+	if metadata.FileExtensions == nil {
+		metadata.FileExtensions = []string{}
+	}
+	if metadata.SourceFiles == nil {
+		metadata.SourceFiles = []models.SourceFileMetadata{}
+	}
+
 	exportData := struct {
+		models.AnalysisMetadata
 		Graph          *models.DependencyGraph `json:"graph"`
 		TotalFiles     int                     `json:"totalFiles"`
 		TotalElements  int                     `json:"totalElements"`
 		ProcessingTime string                  `json:"processingTime"`
-		GeneratedAt    string                  `json:"generatedAt"`
 		Cycles         [][]string              `json:"cycles"`
 	}{
-		Graph:          result.Graph,
-		TotalFiles:     result.TotalFiles,
-		TotalElements:  result.TotalElements,
-		ProcessingTime: result.ProcessingTime,
-		GeneratedAt:    "2025-09-24T18:54:12Z", // You might want to make this dynamic
-		Cycles:         result.Cycles,
+		AnalysisMetadata: metadata,
+		Graph:            result.Graph,
+		TotalFiles:       result.TotalFiles,
+		TotalElements:    result.TotalElements,
+		ProcessingTime:   result.ProcessingTime,
+		Cycles:           result.Cycles,
 	}
 
 	data, err := json.MarshalIndent(exportData, "", "  ")
@@ -44,4 +70,3 @@ func (je *JSONExporter) Export(result *models.AnalysisResult, filename string) e
 
 	return os.WriteFile(filename, data, 0644)
 }
-

@@ -232,7 +232,13 @@ func TestLoad_RoundTrip(t *testing.T) {
 	e := buildTestEngine()
 
 	// Marshal the engine's graph into an analysis envelope and write to a temp file
-	env := analysisEnvelope{Graph: e.graph}
+	env := analysisEnvelope{
+		Graph: e.graph,
+		AnalysisMetadata: models.AnalysisMetadata{
+			SchemaVersion: models.AnalysisSchemaVersion,
+			GeneratedAt:   "2026-01-01T00:00:00Z",
+		},
+	}
 	data, err := json.MarshalIndent(env, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -251,6 +257,9 @@ func TestLoad_RoundTrip(t *testing.T) {
 	r := loaded.Find("GatewayFactory")
 	if r.Count != 1 {
 		t.Errorf("round-trip find: got %d results, want 1", r.Count)
+	}
+	if loaded.metadata.SchemaVersion != models.AnalysisSchemaVersion || loaded.metadata.GeneratedAt == "" {
+		t.Fatalf("metadata did not survive round trip: %+v", loaded.metadata)
 	}
 }
 

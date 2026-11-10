@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -169,6 +170,50 @@ func TestParseQueryArgs_MutuallyExclusiveModes(t *testing.T) {
 	_, err := parseQueryArgs([]string{"--find", "User", "--diagnostics", "analysis.json"})
 	if err == nil {
 		t.Fatal("expected mutually exclusive query modes to fail")
+	}
+}
+
+func TestParseQueryArgs_Status(t *testing.T) {
+	cfg, err := parseQueryArgs([]string{"--status", "analysis.json"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.mode != "status" || cfg.inputFile != "analysis.json" {
+		t.Fatalf("unexpected status config: %+v", cfg)
+	}
+}
+
+func TestBuildAnalysisMetadata(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "main.go")
+	if err := os.WriteFile(path, []byte("package main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := buildAnalysisMetadata(
+		&Config{RootPath: root, ExcludeDirs: []string{"vendor", "cache"}},
+		[]string{"php", "go"},
+		[]string{".php", ".go", ".go"},
+		[]models.FileInfo{{Path: path, RelativePath: "main.go", Size: info.Size()}},
+	)
+	if err != nil {
+		t.Fatalf("buildAnalysisMetadata: %v", err)
+	}
+	if metadata.SchemaVersion != models.AnalysisSchemaVersion || metadata.GeneratedAt == "" {
+		t.Fatalf("missing version or timestamp: %+v", metadata)
+	}
+	if metadata.Generator.Name != "tukey" || !filepath.IsAbs(metadata.RootPath) {
+		t.Fatalf("unexpected generator or root: %+v", metadata)
+	}
+	if !reflect.DeepEqual(metadata.Languages, []string{"go", "php"}) ||
+		!reflect.DeepEqual(metadata.FileExtensions, []string{".go", ".php"}) {
+		t.Fatalf("metadata is not normalized: %+v", metadata)
+	}
+	if len(metadata.SourceFiles) != 1 || metadata.SourceFiles[0].SHA256 == "" {
+		t.Fatalf("missing source fingerprint: %+v", metadata.SourceFiles)
 	}
 }
 

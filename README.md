@@ -167,6 +167,7 @@ Exposed MCP Tools:
 - `tukey_get_dependents` (args: `symbol` string) — Trace what a symbol depends on.
 - `tukey_find_orphans` — Identify candidate dead or orphaned code.
 - `tukey_get_analysis_diagnostics` — Inspect parser errors and unresolved or ambiguous references before trusting graph results.
+- `tukey_get_analysis_status` — Check whether source files are fresh, stale, or missing snapshot metadata.
 - `tukey_get_localized_context` (args: `symbol` string, `depth` int [optional]) — Retrieve a pruned context sub-graph (containing targets, dependencies, and dependents) around a symbol (ideal for AI context pruning).
 
 ### 2. Tukey Command Line Skill
@@ -228,18 +229,32 @@ Identify refactoring opportunities:
 ### JSON Export
 ```json
 {
-  "nodes": {
-    "class:App\\Models\\User": {
-      "id": "class:App\\Models\\User",
-      "name": "User",
-      "type": "class",
-      "file": "/app/Models/User.php",
-      "dependencies": {...},
-      "dependents": {...}
-    }
+  "schemaVersion": 1,
+  "generator": {"name": "tukey", "version": "0.4.0"},
+  "generatedAt": "2026-01-15T12:00:00Z",
+  "rootPath": "/absolute/path/to/project",
+  "languages": ["php"],
+  "excludeDirs": [],
+  "fileExtensions": [".php"],
+  "sourceFiles": [
+    {"path": "app/Models/User.php", "size": 2048, "sha256": "..."}
+  ],
+  "graph": {
+    "nodes": {
+      "class:App\\Models\\User": {
+        "id": "class:App\\Models\\User",
+        "name": "User",
+        "type": "class",
+        "file": "/app/Models/User.php",
+        "dependencies": {},
+        "dependents": {}
+      }
+    },
+    "totalNodes": 1284,
+    "totalEdges": 2891
   },
-  "totalNodes": 1284,
-  "totalEdges": 2891
+  "totalFiles": 100,
+  "totalElements": 1284
 }
 ```
 

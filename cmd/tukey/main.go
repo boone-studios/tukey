@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/boone-studios/tukey/internal/parser"
 	"github.com/boone-studios/tukey/internal/progress"
 	"github.com/boone-studios/tukey/internal/scanner"
+	"github.com/boone-studios/tukey/internal/source"
 	"github.com/boone-studios/tukey/pkg/compare"
 	"github.com/boone-studios/tukey/pkg/guard"
 	"github.com/boone-studios/tukey/pkg/output"
@@ -102,6 +104,7 @@ func main() {
 	// Resolve active languages and merge file extensions
 	langParts := strings.Split(argv.Language, ",")
 	var activeParsers []parser.LanguageParser
+	var activeLanguages []string
 	var mergedExtensions []string
 
 	for _, part := range langParts {
@@ -116,6 +119,7 @@ func main() {
 			os.Exit(1)
 		}
 		activeParsers = append(activeParsers, p)
+		activeLanguages = append(activeLanguages, langKey)
 		mergedExtensions = append(mergedExtensions, p.FileExtensions()...)
 	}
 
@@ -281,6 +285,16 @@ func main() {
 		}
 
 		exportStart := time.Now()
+		metadata, err := buildAnalysisMetadata(argv, activeLanguages, mergedExtensions, files)
+		if err != nil {
+			if exportSpinner != nil {
+				exportSpinner.Stop()
+			}
+			fmt.Fprintf(os.Stderr, "❌ Error collecting source metadata: %v\n", err)
+			os.Exit(1)
+		}
+		result.Metadata = metadata
+
 		exporter := output.NewJSONExporter()
 		if err := exporter.Export(result, argv.OutputFile); err != nil {
 			if exportSpinner != nil {
@@ -467,6 +481,7 @@ QUERY FLAGS:
     --dependents <name>     Show all nodes that the named symbol depends on
     --orphans               List all orphaned nodes (dead code candidates)
     --diagnostics           List parser and unresolved-reference diagnostics
+    --status                Check source freshness against the analysis snapshot
 
 MCP FLAGS:
     -h, --help              Show help message for MCP subcommand
@@ -517,6 +532,46 @@ func getTotalElements(parsedFiles []*models.ParsedFile) int {
 		total += len(file.Elements)
 	}
 	return total
+}
+
+func buildAnalysisMetadata(argv *Config, languages, extensions []string, files []models.FileInfo) (models.AnalysisMetadata, error) {
+	rootPath, err := filepath.Abs(argv.RootPath)
+	if err != nil {
+		return models.AnalysisMetadata{}, err
+	}
+	snapshot, err := source.Snapshot(files)
+	if err != nil {
+		return models.AnalysisMetadata{}, err
+	}
+
+	extensionSet := make(map[string]bool)
+	for _, extension := range extensions {
+		extensionSet[strings.ToLower(extension)] = true
+	}
+	uniqueExtensions := make([]string, 0, len(extensionSet))
+	for extension := range extensionSet {
+		uniqueExtensions = append(uniqueExtensions, extension)
+	}
+	sort.Strings(uniqueExtensions)
+
+	languages = append([]string(nil), languages...)
+	sort.Strings(languages)
+	excludeDirs := append([]string(nil), argv.ExcludeDirs...)
+	sort.Strings(excludeDirs)
+
+	return models.AnalysisMetadata{
+		SchemaVersion: models.AnalysisSchemaVersion,
+		Generator: models.GeneratorMetadata{
+			Name:    "tukey",
+			Version: version,
+		},
+		GeneratedAt:    time.Now().UTC().Format(time.RFC3339),
+		RootPath:       rootPath,
+		Languages:      languages,
+		ExcludeDirs:    excludeDirs,
+		FileExtensions: uniqueExtensions,
+		SourceFiles:    snapshot,
+	}, nil
 }
 
 func getSuccessfullyParsedCount(parsedFiles []*models.ParsedFile) int {

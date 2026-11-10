@@ -48,10 +48,12 @@ type DiagnosticsResult struct {
 
 // Engine queries a pre-built Tukey analysis file without re-running analysis
 type Engine struct {
-	graph *models.DependencyGraph
+	graph    *models.DependencyGraph
+	metadata models.AnalysisMetadata
 }
 
 type analysisEnvelope struct {
+	models.AnalysisMetadata
 	Graph *models.DependencyGraph `json:"graph"`
 }
 
@@ -69,7 +71,7 @@ func Load(path string) (*Engine, error) {
 	if env.Graph == nil {
 		return nil, fmt.Errorf("%s: missing 'graph' field – was this file produced by tukey -o?", path)
 	}
-	return &Engine{graph: env.Graph}, nil
+	return &Engine{graph: env.Graph, metadata: env.AnalysisMetadata}, nil
 }
 
 // Graph returns the underlying dependency graph

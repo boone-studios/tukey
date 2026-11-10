@@ -26,6 +26,30 @@ type FileInfo struct {
 	Size         int64
 }
 
+const AnalysisSchemaVersion = 1
+
+type GeneratorMetadata struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+type SourceFileMetadata struct {
+	Path   string `json:"path"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"`
+}
+
+type AnalysisMetadata struct {
+	SchemaVersion  int                  `json:"schemaVersion"`
+	Generator      GeneratorMetadata    `json:"generator"`
+	GeneratedAt    string               `json:"generatedAt"`
+	RootPath       string               `json:"rootPath"`
+	Languages      []string             `json:"languages"`
+	ExcludeDirs    []string             `json:"excludeDirs"`
+	FileExtensions []string             `json:"fileExtensions"`
+	SourceFiles    []SourceFileMetadata `json:"sourceFiles"`
+}
+
 const (
 	DiagnosticParseError          = "parse_error"
 	DiagnosticUnresolvedSource    = "unresolved_source"
@@ -126,6 +150,7 @@ type AnalysisResult struct {
 	TotalElements  int
 	ProcessingTime string
 	Cycles         [][]string
+	Metadata       AnalysisMetadata
 }
 
 // Lock Concurrency helpers (exported so other packages can coordinate safely)

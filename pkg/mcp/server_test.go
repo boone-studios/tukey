@@ -200,8 +200,8 @@ func TestMCPServer_ToolsList(t *testing.T) {
 		t.Fatalf("tools is not a slice: %T", resultMap["tools"])
 	}
 
-	if len(tools) != 6 {
-		t.Errorf("expected 6 tools, got %d", len(tools))
+	if len(tools) != 7 {
+		t.Errorf("expected 7 tools, got %d", len(tools))
 	}
 }
 
@@ -244,8 +244,13 @@ func TestMCPServer_ToolCalls(t *testing.T) {
 			wantResult: `"query": "diagnostics"`,
 		},
 		{
+			name:       "Get Analysis Status",
+			request:    `{"jsonrpc":"2.0","method":"tools/call","id":16,"params":{"name":"tukey_get_analysis_status","arguments":{}}}` + "\n",
+			wantResult: `"status": "unknown"`,
+		},
+		{
 			name:       "Get Localized Context",
-			request:    `{"jsonrpc":"2.0","method":"tools/call","id":16,"params":{"name":"tukey_get_localized_context","arguments":{"symbol":"GatewayFactory","depth":1}}}` + "\n",
+			request:    `{"jsonrpc":"2.0","method":"tools/call","id":17,"params":{"name":"tukey_get_localized_context","arguments":{"symbol":"GatewayFactory","depth":1}}}` + "\n",
 			wantResult: `"HttpClient"`,
 		},
 	}

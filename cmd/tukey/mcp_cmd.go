@@ -94,6 +94,7 @@ DESCRIPTION:
       - tukey_get_dependents: Trace what a symbol depends on
       - tukey_find_orphans: Trace dead/unused code candidates
       - tukey_get_analysis_diagnostics: Inspect parser and reference-resolution diagnostics
+      - tukey_get_analysis_status: Check source freshness against the analysis snapshot
 
 EXAMPLES:
     tukey mcp analysis.json

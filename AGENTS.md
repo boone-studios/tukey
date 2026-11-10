@@ -44,7 +44,10 @@ At a high level:
   - Handles **exclude directories** (e.g. `vendor`, `.git`, `node_modules`, plus user‑configured ones).  
   - Filters by **file extensions** configured from the selected `LanguageParser`.
 
-- **`internal/models`**  
+- **`internal/source`**
+  - Computes SHA-256 source fingerprints and deterministic file snapshots used by export metadata and freshness checks.
+
+- **`internal/models`**
   - Core data types used across the pipeline:  
     - `FileInfo`: basic file metadata.  
     - `CodeElement`: a single declared item (class, function, method, property, constant).  
@@ -287,8 +290,9 @@ To support a new language:
 - Prefer **adding behavior in `pkg/output`** and plumbing in any required data via `AnalysisResult` rather than calling `fmt.Printf` in deeper layers.
 - `ConsoleFormatter.PrintSummary` is the main entry for console output; verbose mode is where detailed reports (like the function usage report) belong.
 - `JSONExporter` currently exports:
-  - The `DependencyGraph`.  
-  - Basic totals and processing time metadata.
+  - The `DependencyGraph` and its diagnostics.
+  - Totals and processing time.
+  - Versioned generator, timestamp, root, language/scanner settings, and SHA-256 source snapshots for freshness checks.
 
 If you need new JSON fields (e.g. to export function usage summaries or additional metrics), update `models.AnalysisResult` and the anonymous struct in `pkg/output/json.go`. Keep additions **backward compatible** when possible.
 
@@ -338,6 +342,7 @@ tukey query --callers <name>       analysis.json
 tukey query --dependents <name>    analysis.json
 tukey query --orphans              analysis.json
 tukey query --diagnostics          analysis.json
+tukey query --status               analysis.json
 ```
 
 All flags are mutually exclusive; exactly one must be provided alongside the path to an analysis file.
@@ -351,6 +356,7 @@ All flags are mutually exclusive; exactly one must be provided alongside the pat
 | `--dependents <name>` | All nodes that the named symbol **directly depends on** (outgoing edges). |
 | `--orphans` | All nodes with **no dependencies and no dependents** (dead code candidates). |
 | `--diagnostics` | Parser errors and unresolved or ambiguous references, aggregated by file and symbol. |
+| `--status` | Freshness status and added, modified, or deleted source files. |
 
 For `--find`, `--callers`, and `--dependents`, the query engine is highly resilient and supports matching a symbol in several ways:
 - **Short Name**: Just the unqualified symbol name (e.g., `GatewayFactory` or `pay`).
@@ -363,7 +369,7 @@ For `--callers` and `--dependents`, an exact match is preferred using the same c
 
 #### 10.3 Output Schema
 
-Every query returns the same JSON envelope:
+Symbol and diagnostic queries share the following JSON envelope:
 
 ```json
 {
@@ -395,16 +401,18 @@ Every query returns the same JSON envelope:
 - `refType`, `refLines`, and `refCount` are only present on `--callers` and `--dependents` results; they describe how this node references (or is referenced by) the queried symbol.
 - Diagnostic results contain `code`, `severity`, `file`, `message`, `count`, optional symbol/reference metadata, and up to 20 sampled lines.
 - `results` is always a JSON array (never `null`).
+- `--status` instead returns freshness state, snapshot metadata, checked/change counts, and added, modified, or deleted source paths. Legacy exports return `unknown`.
 
 #### 10.4 Implementation
 
-- **`pkg/query/query.go`** – `Engine` struct and query methods (`Find`, `Callers`, `Dependents`, `Orphans`, `Diagnostics`).
-- **`pkg/query/query_test.go`** – unit tests using a synthetic graph.
+- **`pkg/query/query.go`** – `Engine`, graph queries, diagnostics, and analysis-file loading.
+- **`pkg/query/status.go`** – source freshness comparison using the recorded snapshot and scanner settings.
+- **`pkg/query/query_test.go`** and **`status_test.go`** – synthetic graph tests and filesystem-backed freshness tests.
 - **`cmd/tukey/query_cmd.go`** – CLI argument parsing (`parseQueryArgs`) and output encoding.
 - **`cmd/tukey/main.go`** – dispatches to `runQuery(os.Args[2:])` before the analysis path when `os.Args[1] == "query"`.
 
 Agents working on the query subcommand should follow the same conventions:
-- Keep `pkg/query` free of CLI concerns; all user‑facing formatting belongs in `cmd/tukey/query_cmd.go`.
-- The `Engine` depends only on `*models.DependencyGraph` so it can be unit‑tested without a file system.
+- Keep `pkg/query` free of CLI concerns; all user-facing formatting belongs in `cmd/tukey/query_cmd.go`.
+- Graph queries depend only on `*models.DependencyGraph`; freshness checks additionally use metadata and the current source tree.
 - Never change the output schema in a backwards‑incompatible way; downstream agents parse this JSON.
 

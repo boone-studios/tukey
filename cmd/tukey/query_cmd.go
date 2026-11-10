@@ -15,7 +15,7 @@ import (
 
 // queryConfig holds the parsed arguments for the query subcommand.
 type queryConfig struct {
-	mode      string // "find" | "callers" | "dependents" | "orphans" | "diagnostics"
+	mode      string // "find" | "callers" | "dependents" | "orphans" | "diagnostics" | "status"
 	term      string
 	inputFile string
 }
@@ -53,6 +53,13 @@ func runQuery(args []string) {
 		result = engine.Orphans()
 	case "diagnostics":
 		result = engine.Diagnostics()
+	case "status":
+		status, statusErr := engine.Status()
+		if statusErr != nil {
+			fmt.Fprintf(os.Stderr, "Error checking analysis status: %v\n", statusErr)
+			os.Exit(1)
+		}
+		result = status
 	}
 
 	data, err := json.MarshalIndent(result, "", "  ")
@@ -108,6 +115,11 @@ func parseQueryArgs(args []string) (*queryConfig, error) {
 				return nil, err
 			}
 			i++
+		case "--status":
+			if err := setQueryMode(cfg, "status", ""); err != nil {
+				return nil, err
+			}
+			i++
 		default:
 			if strings.HasPrefix(arg, "-") {
 				return nil, fmt.Errorf("unknown flag: %s", arg)
@@ -118,7 +130,7 @@ func parseQueryArgs(args []string) (*queryConfig, error) {
 	}
 
 	if cfg.mode == "" {
-		return nil, fmt.Errorf("query requires one of: --find TERM, --callers TERM, --dependents TERM, --orphans, --diagnostics")
+		return nil, fmt.Errorf("query requires one of: --find TERM, --callers TERM, --dependents TERM, --orphans, --diagnostics, --status")
 	}
 	if cfg.inputFile == "" {
 		// Try to find a default analysis file
@@ -163,6 +175,7 @@ FLAGS:
     --dependents <name>   Show all nodes that the named symbol depends on
     --orphans             List all orphaned nodes (no dependencies and no dependents)
     --diagnostics         List parser and unresolved-reference diagnostics
+    --status              Check whether source files match the analysis snapshot
     -h, --help            Show this help message
 
 EXAMPLES:
@@ -171,6 +184,7 @@ EXAMPLES:
     tukey query --dependents "PaymentService" analysis.json
     tukey query --orphans analysis.json
     tukey query --diagnostics analysis.json
+    tukey query --status analysis.json
 
 OUTPUT:
     All queries emit a JSON object to stdout:
