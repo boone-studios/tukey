@@ -4,7 +4,7 @@ A high-performance static analysis tool that maps code dependencies, highlights 
 large projects. Designed to be **language-agnostic**, the engine can analyze code architecture and usage patterns in any
 language.
 
-Currently supports **PHP**, **JavaScript**, and **Go**.
+Currently supports **PHP**, **JavaScript**, **TypeScript/TSX**, and **Go**. Use `--language ts` for TypeScript files.
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/boone-studios/tukey)](https://goreportcard.com/report/github.com/boone-studios/tukey)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -276,7 +276,7 @@ Identify refactoring opportunities:
 
 | Tool                   | Language Focus                   | Primary Purpose                                | Output Style                 | Complexity/Dependency Metrics   | Multi-language     | CI/CD Friendly      | Footprint                     |
 | ---------------------- | -------------------------------- | ---------------------------------------------- | ---------------------------- | --------------------------------|--------------------| ------------------- | ----------------------------- |
-| **Tukey**              | PHP, JavaScript, Go             | **Maps dependencies, complexity, and orphans** | Console summary, JSON export | ✅ Yes (graph, hotspots, orphans) | 🌍 Designed for it | ✅ Simple JSON + CLI | ⚡ Lightweight (single binary) |
+| **Tukey**              | PHP, JavaScript, TypeScript/TSX, Go             | **Maps dependencies, complexity, and orphans** | Console summary, JSON export | ✅ Yes (graph, hotspots, orphans) | 🌍 Designed for it | ✅ Simple JSON + CLI | ⚡ Lightweight (single binary) |
 | PHPStan                | PHP                              | Type safety, strict type checking              | CLI, IDE integration         | ❌ No                            | ❌ No               | ✅ Yes               | ⚖️ Medium (lots of rules)     |
 | Psalm                  | PHP                              | Type checking + code correctness               | CLI, IDE integration         | ❌ No                            | ❌ No               | ✅ Yes               | ⚖️ Medium                     |
 | PDepend                | PHP                              | Code metrics, class dependencies               | XML, charts, reports         | ✅ Yes (metrics & graphs)        | ❌ No               | ⚠️ Limited          | 🐘 Heavier (XML reports)      |
@@ -290,7 +290,7 @@ Identify refactoring opportunities:
 
 * **Tukey is not a linter**: it doesn’t enforce style or types. Instead, it **draws the map** of your system.
 * **Output is lightweight**: JSON + console means you can plug it into CI pipelines or explore locally without dashboards.
-* **Language-agnostic design**: support for PHP, JavaScript, and Go, with an interface that makes adding new languages straightforward.
+* **Language-agnostic design**: support for PHP, JavaScript, TypeScript/TSX, and Go, with an interface that makes adding new languages straightforward.
 * **Zero infrastructure**: unlike SonarQube, Tukey is just a single binary — no servers, no databases.
 
 For an in-depth, philosophical and technical analysis of how Tukey compares to enterprise quality gates, see the [SonarQube Comparison Guide](docs/sonarqube_comparison.md).
@@ -348,7 +348,7 @@ Quick summary of upcoming targets:
 - [ ] Version Control (Git) Integration (complexity vs. churn and blast radius analysis)
 - [x] Architectural boundary enforcement & layer guardrails (`--strict` and configs)
 - [x] AI Agent MCP micro-graph context pruning (`tukey_get_localized_context`)
-- [x] Polyglot analysis (PHP, JavaScript, Go)
+- [x] Polyglot analysis (PHP, JavaScript, TypeScript/TSX, Go)
 - [ ] Web dashboard for interactive dependency visualization
 - [ ] Integration with popular IDEs
 

@@ -237,13 +237,14 @@ func (dt *DependencyTracker) createDependency(usage models.UsageElement, file *m
 	dt.addDependencyRef(sourceNode, targetNode, usage.Type, usage.Line)
 }
 
+// findSourceNode resolves an enclosing context to a unique node in the same file.
 func (dt *DependencyTracker) findSourceNode(filePath, context string) *models.DependencyNode {
 	candidates := dt.sourceIndex[filePath][context]
 	if len(candidates) > 1 {
 		var members []string
 		for _, nodeID := range candidates {
 			node := dt.graph.Nodes[nodeID]
-			if node != nil && node.ClassName == "" && node.Type != "class" && node.Type != "interface" && node.Type != "trait" && node.Type != "enum" {
+			if node != nil && node.ClassName == "" && node.Type != "class" && node.Type != "interface" && node.Type != "trait" && node.Type != "enum" && node.Type != "type" {
 				members = append(members, nodeID)
 			}
 		}
@@ -423,12 +424,17 @@ func (dt *DependencyTracker) uniqueCandidates(candidates []string, usageType str
 	return match, false
 }
 
+// matchesUsageType reports whether a candidate node can satisfy a reference kind.
 func matchesUsageType(nodeType, usageType string) bool {
 	switch usageType {
-	case "instantiation", "extends", "implements", "uses_trait", "class", "imports":
+	case "instantiation", "extends", "implements", "uses_trait", "imports":
 		return nodeType == "class" || nodeType == "interface" || nodeType == "trait" || nodeType == "enum"
+	case "class":
+		return nodeType == "class" || nodeType == "interface" || nodeType == "trait" || nodeType == "enum" || nodeType == "type"
 	case "function_call", "function":
 		return nodeType == "function"
+	case "jsx":
+		return nodeType == "class" || nodeType == "function"
 	case "method_call":
 		return nodeType == "method" || nodeType == "property"
 	case "static_call":

@@ -16,6 +16,7 @@ func TestProcessFilesRetainsParseDiagnostics(t *testing.T) {
 	}{
 		{name: "PHP", parser: NewPHPParser(), extension: ".php"},
 		{name: "JavaScript", parser: NewJSParser(), extension: ".js"},
+		{name: "TypeScript", parser: NewTSParser(), extension: ".ts"},
 		{name: "Go", parser: NewGoParser(), extension: ".go"},
 	}
 

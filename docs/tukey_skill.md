@@ -28,12 +28,12 @@ Use this skill when you need to:
 ### 1. Build the Codebase Graph (Analysis Phase)
 Run the analysis phase to discover code elements, track imports/usage, and export the unified graph:
 ```bash
-# Analyze a codebase (supports polyglot php, js scanning concurrently)
-tukey -l php,js -o tukey-results.json ./path/to/project
+# Analyze a codebase (supports polyglot php, js, ts scanning concurrently)
+tukey -l php,js,ts -o tukey-results.json ./path/to/project
 ```
 
 #### CLI Flags:
-* `-l, --language <keys>`: Comma-separated list of active languages (e.g., `php`, `js`, or `php,js` for polyglot full-stack projects). Defaults to `php`.
+* `-l, --language <keys>`: Comma-separated list of active languages (e.g., `php`, `js`, `ts`, or `php,js,ts` for polyglot full-stack projects). `ts` includes TypeScript and TSX files. Defaults to `php`.
 * `-o, --output <file>`: Filepath to export the complete analysis graph JSON (highly recommended).
 * `--exclude <dir>`: Directory to ignore (can be used multiple times; `vendor` and `node_modules` are excluded by default).
 * `-v, --verbose`: Print verbose summaries and detailed function usage reports directly to stdout.

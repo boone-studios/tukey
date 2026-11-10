@@ -30,7 +30,7 @@ At a high level:
   - If you change user‑facing behavior or add flags, it usually happens here.
 
 - **`internal/lang`**
-  - Language-specific parsers for PHP, JavaScript, and Go, plus shared parse-failure diagnostics.
+  - Language-specific parsers for PHP, JavaScript, TypeScript/TSX, and Go, plus shared parse-failure diagnostics.
   - Each parser implements `LanguageParser` and self-registers via `parser.Register` in `init()`.
   - Add new language parsers here and keep them **stateless** except for shared regex or configuration.
 
@@ -232,7 +232,7 @@ From `README.md`:
 | **Usage Tracking**         | **Implemented & surfaced** | PHP parser records `UsageElement`s; verbose console output shows a **Function Usage Report** grouping calls by function and file, matching the README example. |
 | **Dead Code Detection**    | **Implemented (orphans)**  | Nodes with zero dependencies and dependents are listed as **Orphaned Elements** in the console summary. |
 | **High Performance**       | **Implemented**            | Concurrent parsing with a bounded worker pool; scanning and analysis are optimized for large trees. |
-| **Language‑agnostic design** | **Implemented (PHP only today)** | `LanguageParser` interface and parser registry support plugging in additional languages without changing `cmd/tukey`. |
+| **Language‑agnostic design** | **Implemented** | `LanguageParser` implementations support PHP, JavaScript, TypeScript/TSX, and Go without changing `cmd/tukey`. |
 
 **Important note for agents:**  
 The function usage report used to exist only in `internal/analyzer.DependencyTracker.PrintFunctionUsageReport`.  
