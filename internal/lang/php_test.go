@@ -259,6 +259,79 @@ enum Status: string implements BackedEnum {
 	}
 }
 
+func TestPHPParser_MultilineAndEmptyScopes(t *testing.T) {
+	tmp := t.TempDir()
+	code := `<?php
+namespace App\Domain;
+
+interface Contract
+{
+    public function validate();
+}
+
+trait Loggable
+{
+}
+
+class User
+{
+    public function validate()
+    {
+        self::validate();
+    }
+
+    use Loggable;
+}
+
+class EmptyClass {}
+
+function globalHelper()
+{
+    validate_global();
+}
+`
+	path := writePHP(t, tmp, "Multiline.php", code)
+
+	parsed, err := NewPHPParser().ParseFile(path)
+	if err != nil {
+		t.Fatalf("ParseFile error: %v", err)
+	}
+
+	elements := make(map[string]bool)
+	for _, element := range parsed.Elements {
+		key := element.Type + ":" + element.ClassName + ":" + element.Name
+		elements[key] = true
+	}
+	for _, expected := range []string{
+		"interface::Contract",
+		"method:Contract:validate",
+		"trait::Loggable",
+		"class::User",
+		"method:User:validate",
+		"class::EmptyClass",
+		"function::globalHelper",
+	} {
+		if !elements[expected] {
+			t.Errorf("missing element %s in %+v", expected, parsed.Elements)
+		}
+	}
+
+	var recursiveCall, traitUse, globalCall bool
+	for _, usage := range parsed.Usage {
+		switch {
+		case usage.Type == "static_call" && usage.Name == "self::validate":
+			recursiveCall = usage.Context == "validate"
+		case usage.Type == "uses_trait" && usage.Name == "Loggable":
+			traitUse = usage.Context == "User"
+		case usage.Type == "function_call" && usage.Name == "validate_global":
+			globalCall = usage.Context == "globalHelper"
+		}
+	}
+	if !recursiveCall || !traitUse || !globalCall {
+		t.Fatalf("incorrect usage contexts: recursive=%t trait=%t global=%t; usage=%+v", recursiveCall, traitUse, globalCall, parsed.Usage)
+	}
+}
+
 func TestPHPParser_BraceDepthAndGroupUse(t *testing.T) {
 	tmp := t.TempDir()
 	code := `<?php

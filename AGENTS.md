@@ -172,6 +172,11 @@ The PHP analyzer is **regex‑driven**, not a full PHP AST. It focuses on the co
       - Skips built‑in PHP functions and common Laravel helpers via `isBuiltinFunction`.  
       - Skips definition lines (`function X` / `class X`) to avoid self‑references.
 
+- **Scope tracking**
+  - Class and function contexts have independent brace depths, so a method closing does not clear its enclosing class.
+  - Declarations can open on the same line or a later line; pending-open state handles next-line braces, and empty bodies close normally.
+  - Abstract/interface declarations ending in `;` do not create a function-body context.
+
 - **Concurrency**
   - `PHPParser.ProcessFiles` processes files in parallel, bounded by a semaphore.  
   - Each parsed file increments a shared progress bar, even on parse errors.  

@@ -107,6 +107,10 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 	inClass := ""
 	inFunction := ""
 	braceDepth := 0
+	classDepth := 0
+	functionDepth := 0
+	classAwaitingBrace := false
+	functionAwaitingBrace := false
 	inMultiLineComment := false
 
 	for scanner.Scan() {
@@ -142,7 +146,16 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 		// Track brace depth to know when we exit classes/functions.
 		// Strip string and comment literals to avoid false positives.
 		cleanLine := stripCommentsAndStrings(line)
+		previousBraceDepth := braceDepth
 		braceDepth += strings.Count(cleanLine, "{") - strings.Count(cleanLine, "}")
+		if classAwaitingBrace && strings.Contains(cleanLine, "{") {
+			classDepth = braceDepth
+			classAwaitingBrace = false
+		}
+		if functionAwaitingBrace && strings.Contains(cleanLine, "{") {
+			functionDepth = braceDepth
+			functionAwaitingBrace = false
+		}
 
 		// Parse namespace
 		if matches := p.namespacePattern.FindStringSubmatch(line); matches != nil {
@@ -180,6 +193,8 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 				}
 			}
 		}
+
+		previousInClass := inClass
 
 		// Parse class declaration
 		if matches := p.classPattern.FindStringSubmatch(line); matches != nil {
@@ -293,6 +308,12 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 			}
 		}
 
+		if inClass != "" && inClass != previousInClass {
+			inFunction = ""
+			functionAwaitingBrace = false
+			openPHPScope(&classAwaitingBrace, &classDepth, cleanLine, previousBraceDepth)
+		}
+
 		// Parse trait uses inside class/enum/interface/trait body
 		if inClass != "" {
 			if matches := p.traitUsePattern.FindStringSubmatch(line); matches != nil {
@@ -335,6 +356,11 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 				}
 				parsed.Elements = append(parsed.Elements, element)
 				inFunction = matches[4]
+				openPHPScope(&functionAwaitingBrace, &functionDepth, cleanLine, previousBraceDepth)
+				if functionAwaitingBrace && strings.HasSuffix(trimmedLine, ";") {
+					inFunction = ""
+					functionAwaitingBrace = false
+				}
 			}
 		}
 
@@ -352,6 +378,11 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 				}
 				parsed.Elements = append(parsed.Elements, element)
 				inFunction = matches[1]
+				openPHPScope(&functionAwaitingBrace, &functionDepth, cleanLine, previousBraceDepth)
+				if functionAwaitingBrace && strings.HasSuffix(trimmedLine, ";") {
+					inFunction = ""
+					functionAwaitingBrace = false
+				}
 			}
 		}
 
@@ -394,14 +425,31 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 		// Parse usage patterns
 		p.parseUsage(line, lineNum, inFunction, inClass, parsed)
 
-		// Reset context when exiting classes/functions
-		if braceDepth == 0 {
+		// Reset each context at its own closing brace.
+		if inFunction != "" && !functionAwaitingBrace && functionDepth > 0 && braceDepth < functionDepth {
+			inFunction = ""
+			functionDepth = 0
+		}
+		if inClass != "" && !classAwaitingBrace && classDepth > 0 && braceDepth < classDepth {
 			inClass = ""
 			inFunction = ""
+			classDepth = 0
+			functionDepth = 0
+			functionAwaitingBrace = false
 		}
 	}
 
 	return parsed, scanner.Err()
+}
+
+func openPHPScope(awaitingBrace *bool, depth *int, cleanLine string, previousDepth int) {
+	if strings.Contains(cleanLine, "{") {
+		*awaitingBrace = false
+		*depth = previousDepth + 1
+		return
+	}
+	*awaitingBrace = true
+	*depth = 0
 }
 
 // parseUsage finds references to external code elements
