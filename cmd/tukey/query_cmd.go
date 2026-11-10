@@ -197,8 +197,9 @@ OUTPUT:
 
     Symbol results include: id, name, type, file, line, score,
     dependencyCount, dependentCount. Callers and --dependents results
-    also include refType, refLines, and refCount. Diagnostics include
-    code, severity, file, message, count, and sampled lines.
+    also include refType, refLines, and refCount. Relationship queries
+    add resolution targets, ambiguity, and per-target relationships.
+    Diagnostics include code, severity, file, message, count, and sampled lines.
 
 `)
 }

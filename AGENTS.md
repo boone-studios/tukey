@@ -365,7 +365,7 @@ For `--find`, `--callers`, and `--dependents`, the query engine is highly resili
 - **Fully-Qualified Member Name**: The full namespace, class, and member (e.g., `App\Services\PaymentService::pay`).
 - **Exact Node ID**: The unique stable identifier (e.g., `class:App\Services\PaymentService` or `method:App\Services\PaymentService::pay`), which resolves in $O(1)$ time.
 
-For `--callers` and `--dependents`, an exact match is preferred using the same candidate resolution, falling back to partial matches if no exact match is found. When multiple nodes match the term (e.g., a method name shared across multiple classes), results are merged across all matches.
+For `--callers` and `--dependents`, an exact match is preferred, falling back to partial matches. `resolution` records the match type, ambiguity, and every target; `relationships` retains each source-target edge instead of merging away target identity. Localized context uses the same metadata and adds traversal depths.
 
 #### 10.3 Output Schema
 
@@ -398,16 +398,18 @@ Symbol and diagnostic queries share the following JSON envelope:
 
 - `term` is omitted for `--orphans` and `--diagnostics`.
 - `namespace` and `className` are omitted when empty.
-- `refType`, `refLines`, and `refCount` are only present on `--callers` and `--dependents` results; they describe how this node references (or is referenced by) the queried symbol.
+- `refType`, `refLines`, and `refCount` are compatibility summaries; `relationships` preserves every matched source-target pair.
+- `resolution.matchType` is `id`, `exact`, `substring`, or `not_found`; `resolution.targets` is always an array for relationship queries.
 - Diagnostic results contain `code`, `severity`, `file`, `message`, `count`, optional symbol/reference metadata, and up to 20 sampled lines.
 - `results` is always a JSON array (never `null`).
 - `--status` instead returns freshness state, snapshot metadata, checked/change counts, and added, modified, or deleted source paths. Legacy exports return `unknown`.
 
 #### 10.4 Implementation
 
-- **`pkg/query/query.go`** – `Engine`, graph queries, diagnostics, and analysis-file loading.
+- **`pkg/query/query.go`** – `Engine`, symbol lookup, diagnostics, and analysis-file loading.
+- **`pkg/query/relationships.go`** – caller/dependency relationships and localized traversal with resolution metadata.
 - **`pkg/query/status.go`** – source freshness comparison using the recorded snapshot and scanner settings.
-- **`pkg/query/query_test.go`** and **`status_test.go`** – synthetic graph tests and filesystem-backed freshness tests.
+- **`pkg/query/*_test.go`** – synthetic graph, relationship, and filesystem-backed freshness tests.
 - **`cmd/tukey/query_cmd.go`** – CLI argument parsing (`parseQueryArgs`) and output encoding.
 - **`cmd/tukey/main.go`** – dispatches to `runQuery(os.Args[2:])` before the analysis path when `os.Args[1] == "query"`.
 

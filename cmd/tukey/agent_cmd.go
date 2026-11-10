@@ -603,6 +603,8 @@ Use the Tukey MCP tools to answer questions about this codebase's dependency str
 - ` + "`tukey_get_analysis_status`" + ` — check whether source files match the analysis snapshot
 - ` + "`tukey_get_localized_context`" + ` — get a dependency subgraph around a symbol
 
+**When ` + "`resolution.ambiguous`" + ` is true**, repeat the query with a class-qualified name or exact node ID. Use ` + "`relationships`" + ` to trace each source-target pair.
+
 **Before trusting graph results**, call ` + "`tukey_get_analysis_status`" + ` and ` + "`tukey_get_analysis_diagnostics`" + ` to check freshness and completeness.
 
 **If the analysis is stale**, rebuild it first:

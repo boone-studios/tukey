@@ -85,6 +85,8 @@ Tukey's query engine is highly resilient and supports matching a symbol in sever
 4. **Namespaced Short Name**: `App\Services\PaymentService`
 5. **Short Name**: `PaymentService` or `pay`
 
+Caller, dependency, and localized-context responses include a `resolution` object with `matchType` (`id`, `exact`, `substring`, or `not_found`), `ambiguous`, and all matched `targets`. Their `relationships` array preserves each `sourceId`, `targetId`, reference `type`, `lines`, `count`, and traversal `depth`. When `ambiguous` is true, repeat the query with a qualified name or exact ID instead of treating the merged summary as one symbol.
+
 ---
 
 ## 📋 JSON Query Output Schema
@@ -115,8 +117,8 @@ Every `tukey query` returns a predictable JSON envelope. Symbol queries contain 
 }
 ```
 
-* `results` is always a JSON array (never `null` or empty on misses; it will be `[]`).
-* `refType`, `refLines`, and `refCount` are populated for `--callers` and `--dependents` queries to show exactly *how* and *where* (line numbers) the connection occurs.
+* `results` is always a JSON array (never `null` or empty on misses; it will be `[]`). For caller/dependency queries it is a unique-node summary.
+* `refType`, `refLines`, and `refCount` remain for compatibility, but may summarize only the first target relationship for a node. Use `relationships` when target identity matters.
 
 `--diagnostics` results instead contain `code`, `severity`, `file`, `message`, `count`, optional `symbol` and `referenceType`, and up to 20 sampled `lines`. The envelope's `count` is the number of diagnostic groups; each result's `count` is the number of occurrences in that group. Codes are `parse_error`, `unresolved_source`, `unresolved_reference`, and `ambiguous_reference`.
 

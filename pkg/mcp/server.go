@@ -162,7 +162,7 @@ func (s *Server) dispatch(method string, params json.RawMessage) (interface{}, *
 				},
 				{
 					Name:        "tukey_get_callers",
-					Description: "Show all code elements that call or reference a given symbol (incoming edges).",
+					Description: "Show incoming references with matched-target resolution and per-target relationship details.",
 					InputSchema: InputSchema{
 						Type: "object",
 						Properties: map[string]Property{
@@ -176,7 +176,7 @@ func (s *Server) dispatch(method string, params json.RawMessage) (interface{}, *
 				},
 				{
 					Name:        "tukey_get_dependents",
-					Description: "Show all code elements that the named symbol directly depends on (outgoing edges).",
+					Description: "Show outgoing references with matched-target resolution and per-target relationship details.",
 					InputSchema: InputSchema{
 						Type: "object",
 						Properties: map[string]Property{
@@ -211,7 +211,7 @@ func (s *Server) dispatch(method string, params json.RawMessage) (interface{}, *
 				},
 				{
 					Name:        "tukey_get_localized_context",
-					Description: "Get a minimized localized context graph around a target symbol, returning its direct dependencies and dependents up to a specified depth limit.",
+					Description: "Get a localized graph with matched targets, dependency and dependent nodes, and depth-labelled relationships.",
 					InputSchema: InputSchema{
 						Type: "object",
 						Properties: map[string]Property{
