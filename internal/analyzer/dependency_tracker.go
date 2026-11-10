@@ -328,7 +328,7 @@ func (dt *DependencyTracker) findTargetNode(name, usageType string, file *models
 			}
 		}
 
-		if fullyQualified || file.Namespace == "" {
+		if fullyQualified {
 			return dt.uniqueNode([]string{symbolKey("", qualifiedClass, memberName)}, usageType)
 		}
 		if imported := resolveImport(file, qualifiedClass); imported != "" {

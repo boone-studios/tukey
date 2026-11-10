@@ -355,6 +355,23 @@ func TestMCPServer_Pagination(t *testing.T) {
 	if !isErr || !strings.Contains(text, "limit must not be negative") {
 		t.Fatalf("expected negative limit error, got %s", text)
 	}
+
+	invalidLimits := []struct {
+		name string
+		args string
+	}{
+		{name: "tukey_find_symbol", args: `{"term":"Node","limit":"two"}`},
+		{name: "tukey_get_callers", args: `{"symbol":"Node","limit":"two"}`},
+		{name: "tukey_get_dependents", args: `{"symbol":"Node","limit":"two"}`},
+		{name: "tukey_find_orphans", args: `{"limit":"two"}`},
+		{name: "tukey_get_localized_context", args: `{"symbol":"Node","limit":"two"}`},
+	}
+	for _, tt := range invalidLimits {
+		text, isErr = server.handleToolCall(tt.name, json.RawMessage(tt.args))
+		if !isErr || !strings.Contains(text, "limit") || !strings.Contains(text, "cannot unmarshal") {
+			t.Errorf("%s should report the invalid limit type, got %s", tt.name, text)
+		}
+	}
 }
 
 func TestMCPServer_Errors(t *testing.T) {

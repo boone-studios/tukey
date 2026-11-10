@@ -286,7 +286,7 @@ func (s *Server) handleToolCall(name string, args json.RawMessage) (string, bool
 			Cursor string `json:"cursor"`
 		}
 		if err := json.Unmarshal(args, &arguments); err != nil {
-			return "Error: failed to parse arguments: missing 'term' string.", true
+			return fmt.Sprintf("Error: invalid arguments: %v", err), true
 		}
 		if arguments.Term == "" {
 			return "Error: 'term' argument must be a non-empty string.", true
@@ -301,7 +301,7 @@ func (s *Server) handleToolCall(name string, args json.RawMessage) (string, bool
 			Cursor string `json:"cursor"`
 		}
 		if err := json.Unmarshal(args, &arguments); err != nil {
-			return "Error: failed to parse arguments: missing 'symbol' string.", true
+			return fmt.Sprintf("Error: invalid arguments: %v", err), true
 		}
 		if arguments.Symbol == "" {
 			return "Error: 'symbol' argument must be a non-empty string.", true
@@ -316,7 +316,7 @@ func (s *Server) handleToolCall(name string, args json.RawMessage) (string, bool
 			Cursor string `json:"cursor"`
 		}
 		if err := json.Unmarshal(args, &arguments); err != nil {
-			return "Error: failed to parse arguments: missing 'symbol' string.", true
+			return fmt.Sprintf("Error: invalid arguments: %v", err), true
 		}
 		if arguments.Symbol == "" {
 			return "Error: 'symbol' argument must be a non-empty string.", true
@@ -356,7 +356,7 @@ func (s *Server) handleToolCall(name string, args json.RawMessage) (string, bool
 			Cursor string `json:"cursor"`
 		}
 		if err := json.Unmarshal(args, &arguments); err != nil {
-			return "Error: failed to parse arguments: missing 'symbol' string.", true
+			return fmt.Sprintf("Error: invalid arguments: %v", err), true
 		}
 		if arguments.Symbol == "" {
 			return "Error: 'symbol' argument must be a non-empty string.", true
@@ -380,7 +380,7 @@ func parsePageOptions(args json.RawMessage) (query.PageOptions, error) {
 	}
 	if len(args) > 0 {
 		if err := json.Unmarshal(args, &arguments); err != nil {
-			return query.PageOptions{}, fmt.Errorf("invalid pagination arguments")
+			return query.PageOptions{}, fmt.Errorf("invalid pagination arguments: %w", err)
 		}
 	}
 	if arguments.Limit < 0 {

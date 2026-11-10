@@ -94,7 +94,7 @@ Caller, dependency, and localized-context responses include a `resolution` objec
 Every `tukey query` returns a predictable JSON envelope. Symbol queries contain node results:
 ```json
 {
-  "query": "find | callers | dependents | orphans | diagnostics",
+  "query": "find | callers | dependents | orphans | diagnostics | status",
   "term": "<search term>",
   "count": 1,
   "results": [
@@ -117,6 +117,7 @@ Every `tukey query` returns a predictable JSON envelope. Symbol queries contain 
 }
 ```
 
+* `term` is present only for `find`, `callers`, and `dependents`; `orphans`, `diagnostics`, and `status` omit it.
 * `results` is always a JSON array (never `null` or empty on misses; it will be `[]`). For caller/dependency queries it is a unique-node summary.
 * `refType`, `refLines`, and `refCount` remain for compatibility, but may summarize only the first target relationship for a node. Use `relationships` when target identity matters.
 

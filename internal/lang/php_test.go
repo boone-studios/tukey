@@ -266,7 +266,7 @@ namespace App\Domain;
 
 interface Contract
 {
-    public function validate();
+    public function validate(); // bodiless declaration
 }
 
 trait Loggable
@@ -284,6 +284,14 @@ class User
 }
 
 class EmptyClass {}
+
+class DeferredEmpty
+{}
+
+class AfterDeferredEmpty {}
+
+function deferredEmpty()
+{}
 
 function globalHelper()
 {
@@ -309,6 +317,9 @@ function globalHelper()
 		"class::User",
 		"method:User:validate",
 		"class::EmptyClass",
+		"class::DeferredEmpty",
+		"class::AfterDeferredEmpty",
+		"function::deferredEmpty",
 		"function::globalHelper",
 	} {
 		if !elements[expected] {
@@ -320,7 +331,7 @@ function globalHelper()
 	for _, usage := range parsed.Usage {
 		switch {
 		case usage.Type == "static_call" && usage.Name == "self::validate":
-			recursiveCall = usage.Context == "validate"
+			recursiveCall = usage.Context == "User::validate"
 		case usage.Type == "uses_trait" && usage.Name == "Loggable":
 			traitUse = usage.Context == "User"
 		case usage.Type == "function_call" && usage.Name == "validate_global":

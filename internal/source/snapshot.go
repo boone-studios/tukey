@@ -5,8 +5,10 @@ package source
 
 import (
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"sort"
@@ -33,6 +35,9 @@ func Snapshot(files []models.FileInfo) ([]models.SourceFileMetadata, error) {
 	for _, file := range files {
 		hash, err := Fingerprint(file.Path)
 		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
+				continue
+			}
 			return nil, fmt.Errorf("hash %s: %w", file.Path, err)
 		}
 		snapshot = append(snapshot, models.SourceFileMetadata{

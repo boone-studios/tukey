@@ -91,7 +91,7 @@ export default class UserService extends BaseService {
 		if u.Type == "extends" && u.Name == "BaseService" && u.Context == "UserService" {
 			foundExtends = true
 		}
-		if u.Type == "instantiation" && u.Name == "UserService" && u.Context == "create" {
+		if u.Type == "instantiation" && u.Name == "UserService" && u.Context == "UserService::create" {
 			foundInstantiation = true
 		}
 	}

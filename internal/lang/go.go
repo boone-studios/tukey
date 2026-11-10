@@ -422,6 +422,9 @@ func (w *goASTWalker) Visit(node ast.Node) ast.Visitor {
 				recvName = n.Recv.List[0].Names[0].Name
 			}
 			recvType := getBaseTypeName(n.Recv.List[0].Type)
+			if recvType != "" {
+				w.currentContext = recvType + "::" + n.Name.Name
+			}
 			if recvName != "" && recvType != "" {
 				w.localTypes[recvName] = recvType
 			}

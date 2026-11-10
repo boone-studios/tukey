@@ -149,11 +149,11 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 		previousBraceDepth := braceDepth
 		braceDepth += strings.Count(cleanLine, "{") - strings.Count(cleanLine, "}")
 		if classAwaitingBrace && strings.Contains(cleanLine, "{") {
-			classDepth = braceDepth
+			classDepth = previousBraceDepth + 1
 			classAwaitingBrace = false
 		}
 		if functionAwaitingBrace && strings.Contains(cleanLine, "{") {
-			functionDepth = braceDepth
+			functionDepth = previousBraceDepth + 1
 			functionAwaitingBrace = false
 		}
 
@@ -357,7 +357,7 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 				parsed.Elements = append(parsed.Elements, element)
 				inFunction = matches[4]
 				openPHPScope(&functionAwaitingBrace, &functionDepth, cleanLine, previousBraceDepth)
-				if functionAwaitingBrace && strings.HasSuffix(trimmedLine, ";") {
+				if functionAwaitingBrace && strings.HasSuffix(strings.TrimSpace(cleanLine), ";") {
 					inFunction = ""
 					functionAwaitingBrace = false
 				}
@@ -379,7 +379,7 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 				parsed.Elements = append(parsed.Elements, element)
 				inFunction = matches[1]
 				openPHPScope(&functionAwaitingBrace, &functionDepth, cleanLine, previousBraceDepth)
-				if functionAwaitingBrace && strings.HasSuffix(trimmedLine, ";") {
+				if functionAwaitingBrace && strings.HasSuffix(strings.TrimSpace(cleanLine), ";") {
 					inFunction = ""
 					functionAwaitingBrace = false
 				}
@@ -455,7 +455,9 @@ func openPHPScope(awaitingBrace *bool, depth *int, cleanLine string, previousDep
 // parseUsage finds references to external code elements
 func (p *PHPParser) parseUsage(line string, lineNum int, inFunction, inClass string, parsed *models.ParsedFile) {
 	context := inFunction
-	if context == "" {
+	if inFunction != "" && inClass != "" {
+		context = inClass + "::" + inFunction
+	} else if context == "" {
 		context = inClass
 	}
 

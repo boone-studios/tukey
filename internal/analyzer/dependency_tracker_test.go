@@ -339,6 +339,64 @@ func TestFindTargetNode_ResolvesEnclosingClassAndStaticProperty(t *testing.T) {
 	}
 }
 
+func TestQualifiedMethodContextsPreserveSameNamedSourceEdges(t *testing.T) {
+	file := &models.ParsedFile{
+		Path:      "services.go",
+		Namespace: "example/services",
+		Elements: []models.CodeElement{
+			{Type: "class", Name: "Invoice", Namespace: "example/services", Line: 1},
+			{Type: "method", Name: "process", Namespace: "example/services", ClassName: "Invoice", Line: 2},
+			{Type: "method", Name: "helper", Namespace: "example/services", ClassName: "Invoice", Line: 3},
+			{Type: "class", Name: "Order", Namespace: "example/services", Line: 4},
+			{Type: "method", Name: "process", Namespace: "example/services", ClassName: "Order", Line: 5},
+			{Type: "method", Name: "helper", Namespace: "example/services", ClassName: "Order", Line: 6},
+		},
+		Usage: []models.UsageElement{
+			{Type: "method_call", Name: "example/services\\Invoice::helper", Context: "Invoice::process", Line: 2},
+			{Type: "method_call", Name: "example/services\\Order::helper", Context: "Order::process", Line: 5},
+		},
+	}
+
+	graph := NewDependencyTracker().BuildDependencyGraph([]*models.ParsedFile{file})
+	invoiceHelper := graph.Nodes["method:example/services\\Invoice::helper"]
+	orderHelper := graph.Nodes["method:example/services\\Order::helper"]
+	if invoiceHelper == nil || invoiceHelper.Dependents["method:example/services\\Invoice::process"] == nil {
+		t.Fatalf("expected Invoice::process to call Invoice::helper, got %+v", invoiceHelper)
+	}
+	if orderHelper == nil || orderHelper.Dependents["method:example/services\\Order::process"] == nil {
+		t.Fatalf("expected Order::process to call Order::helper, got %+v", orderHelper)
+	}
+	if len(graph.Diagnostics) != 0 {
+		t.Fatalf("qualified method contexts should resolve, got %+v", graph.Diagnostics)
+	}
+}
+
+func TestFindTargetNode_ResolvesImportsWithoutNamespace(t *testing.T) {
+	target := &models.ParsedFile{
+		Path:      "vendor/Invoice.php",
+		Namespace: "Vendor\\Billing",
+		Elements: []models.CodeElement{
+			{Type: "class", Name: "Invoice", Namespace: "Vendor\\Billing", Line: 3},
+			{Type: "method", Name: "save", Namespace: "Vendor\\Billing", ClassName: "Invoice", Line: 5},
+		},
+	}
+	caller := &models.ParsedFile{
+		Path:          "save.php",
+		Uses:          []string{"Vendor\\Billing\\Invoice"},
+		ImportAliases: map[string]string{"Invoice": "Vendor\\Billing\\Invoice"},
+		Elements:      []models.CodeElement{{Type: "function", Name: "saveInvoice", Line: 5}},
+		Usage: []models.UsageElement{
+			{Type: "static_call", Name: "Invoice::save", Context: "saveInvoice", Line: 6},
+		},
+	}
+
+	graph := NewDependencyTracker().BuildDependencyGraph([]*models.ParsedFile{caller, target})
+	method := graph.Nodes["method:Vendor\\Billing\\Invoice::save"]
+	if method == nil || method.Dependents["function:saveInvoice"] == nil {
+		t.Fatalf("expected namespaceless import to resolve, got %+v", method)
+	}
+}
+
 func TestCalculateComplexityScore(t *testing.T) {
 	dt := NewDependencyTracker()
 

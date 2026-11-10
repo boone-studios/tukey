@@ -204,7 +204,9 @@ func (p *JSParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 
 func (p *JSParser) parseUsage(line string, lineNum int, inFunction, inClass string, parsed *models.ParsedFile) {
 	context := inFunction
-	if context == "" {
+	if inFunction != "" && inClass != "" {
+		context = inClass + "::" + inFunction
+	} else if context == "" {
 		context = inClass
 	}
 
