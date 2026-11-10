@@ -461,3 +461,54 @@ const nested = <Layout><UserCard /></Layout>;
 		t.Errorf("missing real JSX tags: %+v", parsed.Usage)
 	}
 }
+
+func TestTSParser_ImportBufferDoesNotSwallowDeclarations(t *testing.T) {
+	tests := []struct {
+		name         string
+		statement    string
+		expectedUses []string
+	}{
+		{
+			name:         "local export",
+			statement:    "export { foo };",
+			expectedUses: []string{},
+		},
+		{
+			name:         "multiline local export",
+			statement:    "export {\n    foo\n};",
+			expectedUses: []string{},
+		},
+		{
+			name:         "import equals require",
+			statement:    "import x = require('x');",
+			expectedUses: []string{"x"},
+		},
+		{
+			name:         "qualified import equals",
+			statement:    "import A = B.C;",
+			expectedUses: []string{},
+		},
+		{
+			name:         "export star as",
+			statement:    "export * as ns from './z';",
+			expectedUses: []string{"./z"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			path := writeTS(t, tmp, "statement.ts", tt.statement+"\nexport class After {}\n")
+			parsed, err := NewTSParser().ParseFile(path)
+			if err != nil {
+				t.Fatalf("ParseFile error: %v", err)
+			}
+			if findTSElement(parsed.Elements, "class", "After") == nil {
+				t.Errorf("statement swallowed later declaration: %+v", parsed.Elements)
+			}
+			if !reflect.DeepEqual(parsed.Uses, tt.expectedUses) {
+				t.Errorf("Uses = %+v, want %+v", parsed.Uses, tt.expectedUses)
+			}
+		})
+	}
+}

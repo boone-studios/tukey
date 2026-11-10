@@ -46,7 +46,7 @@ func NewTSParser() *TSParser {
 
 	return &TSParser{
 		importPattern:        regexp.MustCompile(`^\s*import\s+(?:type\s+)?(?:(.+?)\s+from\s+)?['"]([^'"]+)['"]`),
-		exportFromPattern:    regexp.MustCompile(`^\s*export\s+(?:type\s+)?(?:\*|\{[^}]*\})\s+from\s+['"]([^'"]+)['"]`),
+		exportFromPattern:    regexp.MustCompile(`^\s*export\s+(?:type\s+)?(?:\*(?:\s+as\s+` + identifier + `)?|\{[^}]*\})\s+from\s+['"]([^'"]+)['"]`),
 		requirePattern:       regexp.MustCompile(`\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)`),
 		dynamicImportPattern: regexp.MustCompile(`\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)`),
 		classPattern:         regexp.MustCompile(`^\s*(?:export\s+(?:default\s+)?)?(?:declare\s+)?(abstract\s+)?class\s+(` + identifier + `)([^\{]*)`),
@@ -141,10 +141,14 @@ func (p *TSParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 				p.parseImports(statement, filePath, parsed)
 				importStatement.Reset()
 				inImportStatement = false
+			} else if strings.Count(statement, "{") <= strings.Count(statement, "}") {
+				importStatement.Reset()
+				inImportStatement = false
 			}
 			continue
 		}
 		if container == nil && isTSImportStatementStart(trimmedLine) &&
+			strings.Count(trimmedLine, "{") > strings.Count(trimmedLine, "}") &&
 			!p.importPattern.MatchString(trimmedLine) && !p.exportFromPattern.MatchString(trimmedLine) {
 			importStatement.WriteString(trimmedLine)
 			inImportStatement = true
