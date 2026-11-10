@@ -29,9 +29,9 @@ At a high level:
   - Parses flags, merges config, orchestrates scanning, parsing, analysis, and output.  
   - If you change user‑facing behavior or add flags, it usually happens here.
 
-- **`internal/lang`**  
-  - Language‑specific parsers (currently only PHP).  
-  - `php.go` implements `LanguageParser` and self‑registers via `parser.Register` in `init()`.  
+- **`internal/lang`**
+  - Language-specific parsers for PHP, JavaScript, and Go, plus shared parse-failure diagnostics.
+  - Each parser implements `LanguageParser` and self-registers via `parser.Register` in `init()`.
   - Add new language parsers here and keep them **stateless** except for shared regex or configuration.
 
 - **`internal/parser`**  
@@ -172,7 +172,7 @@ The PHP analyzer is **regex‑driven**, not a full PHP AST. It focuses on the co
 - **Concurrency**
   - `PHPParser.ProcessFiles` processes files in parallel, bounded by a semaphore.  
   - Each parsed file increments a shared progress bar, even on parse errors.  
-  - Errors are logged but do **not** abort the entire analysis.
+  - Per-file failures produce structured `parse_error` diagnostics and do **not** abort the entire analysis.
 
 When extending PHP support (e.g., better generics, traits, or more nuanced method resolution), keep the **regex approach simple** and focused on what the dependency graph needs.
 
@@ -337,6 +337,7 @@ tukey query --find <term>          analysis.json
 tukey query --callers <name>       analysis.json
 tukey query --dependents <name>    analysis.json
 tukey query --orphans              analysis.json
+tukey query --diagnostics          analysis.json
 ```
 
 All flags are mutually exclusive; exactly one must be provided alongside the path to an analysis file.
@@ -349,6 +350,7 @@ All flags are mutually exclusive; exactly one must be provided alongside the pat
 | `--callers <name>` | All nodes that **call or reference** the named symbol (incoming edges). |
 | `--dependents <name>` | All nodes that the named symbol **directly depends on** (outgoing edges). |
 | `--orphans` | All nodes with **no dependencies and no dependents** (dead code candidates). |
+| `--diagnostics` | Parser errors and unresolved or ambiguous references, aggregated by file and symbol. |
 
 For `--find`, `--callers`, and `--dependents`, the query engine is highly resilient and supports matching a symbol in several ways:
 - **Short Name**: Just the unqualified symbol name (e.g., `GatewayFactory` or `pay`).
@@ -365,7 +367,7 @@ Every query returns the same JSON envelope:
 
 ```json
 {
-  "query":   "find | callers | dependents | orphans",
+  "query":   "find | callers | dependents | orphans | diagnostics",
   "term":    "<search term>",
   "count":   42,
   "results": [
@@ -388,14 +390,15 @@ Every query returns the same JSON envelope:
 }
 ```
 
-- `term` is omitted for `--orphans`.  
-- `namespace` and `className` are omitted when empty.  
-- `refType`, `refLines`, and `refCount` are only present on `--callers` and `--dependents` results; they describe how this node references (or is referenced by) the queried symbol.  
+- `term` is omitted for `--orphans` and `--diagnostics`.
+- `namespace` and `className` are omitted when empty.
+- `refType`, `refLines`, and `refCount` are only present on `--callers` and `--dependents` results; they describe how this node references (or is referenced by) the queried symbol.
+- Diagnostic results contain `code`, `severity`, `file`, `message`, `count`, optional symbol/reference metadata, and up to 20 sampled lines.
 - `results` is always a JSON array (never `null`).
 
 #### 10.4 Implementation
 
-- **`pkg/query/query.go`** – `Engine` struct and query methods (`Find`, `Callers`, `Dependents`, `Orphans`).
+- **`pkg/query/query.go`** – `Engine` struct and query methods (`Find`, `Callers`, `Dependents`, `Orphans`, `Diagnostics`).
 - **`pkg/query/query_test.go`** – unit tests using a synthetic graph.
 - **`cmd/tukey/query_cmd.go`** – CLI argument parsing (`parseQueryArgs`) and output encoding.
 - **`cmd/tukey/main.go`** – dispatches to `runQuery(os.Args[2:])` before the analysis path when `os.Args[1] == "query"`.

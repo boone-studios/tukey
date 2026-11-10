@@ -205,6 +205,48 @@ func TestFindTargetNode_AmbiguousMethodCallDoesNotCreateEdge(t *testing.T) {
 	if graph.TotalEdges != 0 {
 		t.Fatalf("ambiguous method call should not create an edge, got %d", graph.TotalEdges)
 	}
+	if len(graph.Diagnostics) != 1 || graph.Diagnostics[0].Code != models.DiagnosticAmbiguousReference {
+		t.Fatalf("expected ambiguous-reference diagnostic, got %+v", graph.Diagnostics)
+	}
+}
+
+func TestResolutionDiagnosticsAreAggregated(t *testing.T) {
+	file := &models.ParsedFile{
+		Path:      "app/helpers.php",
+		Namespace: "App",
+		Elements:  []models.CodeElement{{Type: "function", Name: "process", Namespace: "App", Line: 10}},
+	}
+	for line := 12; line < 37; line++ {
+		file.Usage = append(file.Usage, models.UsageElement{
+			Type: "function_call", Name: "externalHelper", Context: "process", Line: line,
+		})
+	}
+
+	graph := NewDependencyTracker().BuildDependencyGraph([]*models.ParsedFile{file})
+	if len(graph.Diagnostics) != 1 {
+		t.Fatalf("expected one aggregated diagnostic, got %+v", graph.Diagnostics)
+	}
+	diagnostic := graph.Diagnostics[0]
+	if diagnostic.Code != models.DiagnosticUnresolvedReference || diagnostic.Count != 25 {
+		t.Fatalf("unexpected diagnostic aggregation: %+v", diagnostic)
+	}
+	if diagnostic.ReferenceType != "function_call" || len(diagnostic.Lines) != 20 {
+		t.Fatalf("diagnostic should retain 20 sampled lines, got %+v", diagnostic)
+	}
+}
+
+func TestParseDiagnosticsAreIncludedInGraph(t *testing.T) {
+	file := &models.ParsedFile{
+		Path: "app/broken.php",
+		Diagnostics: []models.AnalysisDiagnostic{{
+			Code: models.DiagnosticParseError, Severity: models.DiagnosticSeverityError,
+			File: "app/broken.php", Message: "invalid syntax", Count: 1,
+		}},
+	}
+	graph := NewDependencyTracker().BuildDependencyGraph([]*models.ParsedFile{file})
+	if len(graph.Diagnostics) != 1 || graph.Diagnostics[0].Code != models.DiagnosticParseError {
+		t.Fatalf("expected parser diagnostic in graph, got %+v", graph.Diagnostics)
+	}
 }
 
 func TestFindTargetNode_ResolvesImportAlias(t *testing.T) {

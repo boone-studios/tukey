@@ -397,6 +397,24 @@ func TestLocalizedContext(t *testing.T) {
 	})
 }
 
+func TestDiagnostics(t *testing.T) {
+	e := &Engine{graph: &models.DependencyGraph{Diagnostics: []models.AnalysisDiagnostic{
+		{Code: models.DiagnosticParseError, Severity: models.DiagnosticSeverityError, File: "broken.php", Message: "invalid syntax", Count: 1},
+	}}}
+	result := e.Diagnostics()
+	if result.Query != "diagnostics" || result.Count != 1 || len(result.Results) != 1 {
+		t.Fatalf("unexpected diagnostics result: %+v", result)
+	}
+	if result.Results[0].Code != models.DiagnosticParseError {
+		t.Fatalf("unexpected diagnostic: %+v", result.Results[0])
+	}
+
+	empty := (&Engine{graph: &models.DependencyGraph{}}).Diagnostics()
+	if empty.Results == nil || empty.Count != 0 {
+		t.Fatalf("empty diagnostics should return [], got %+v", empty)
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsStr(s, substr))
 }

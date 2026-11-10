@@ -5,10 +5,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/boone-studios/tukey/internal/models"
 )
 
 func TestJSONExporter_Export(t *testing.T) {
 	res := makeDummyResult()
+	res.Graph.Diagnostics = []models.AnalysisDiagnostic{{
+		Code: models.DiagnosticParseError, Severity: models.DiagnosticSeverityError,
+		File: "broken.php", Message: "invalid syntax", Count: 1,
+	}}
 	je := NewJSONExporter()
 
 	tmp := t.TempDir()
@@ -29,5 +35,7 @@ func TestJSONExporter_Export(t *testing.T) {
 	if !strings.Contains(out, `"graph"`) {
 		t.Errorf("expected graph in JSON, got:\n%s", out)
 	}
+	if !strings.Contains(out, `"code": "parse_error"`) {
+		t.Errorf("expected diagnostics in JSON, got:\n%s", out)
+	}
 }
-

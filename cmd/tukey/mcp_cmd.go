@@ -93,6 +93,7 @@ DESCRIPTION:
       - tukey_get_callers: Trace who calls a symbol
       - tukey_get_dependents: Trace what a symbol depends on
       - tukey_find_orphans: Trace dead/unused code candidates
+      - tukey_get_analysis_diagnostics: Inspect parser and reference-resolution diagnostics
 
 EXAMPLES:
     tukey mcp analysis.json

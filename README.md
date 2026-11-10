@@ -166,6 +166,7 @@ Exposed MCP Tools:
 - `tukey_get_callers` (args: `symbol` string) — Trace what calls/references a symbol.
 - `tukey_get_dependents` (args: `symbol` string) — Trace what a symbol depends on.
 - `tukey_find_orphans` — Identify candidate dead or orphaned code.
+- `tukey_get_analysis_diagnostics` — Inspect parser errors and unresolved or ambiguous references before trusting graph results.
 - `tukey_get_localized_context` (args: `symbol` string, `depth` int [optional]) — Retrieve a pruned context sub-graph (containing targets, dependencies, and dependents) around a symbol (ideal for AI context pruning).
 
 ### 2. Tukey Command Line Skill

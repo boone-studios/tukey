@@ -15,7 +15,7 @@ import (
 
 // queryConfig holds the parsed arguments for the query subcommand.
 type queryConfig struct {
-	mode      string // "find" | "callers" | "dependents" | "orphans"
+	mode      string // "find" | "callers" | "dependents" | "orphans" | "diagnostics"
 	term      string
 	inputFile string
 }
@@ -41,7 +41,7 @@ func runQuery(args []string) {
 		os.Exit(1)
 	}
 
-	var result query.QueryResult
+	var result interface{}
 	switch cfg.mode {
 	case "find":
 		result = engine.Find(cfg.term)
@@ -51,6 +51,8 @@ func runQuery(args []string) {
 		result = engine.Dependents(cfg.term)
 	case "orphans":
 		result = engine.Orphans()
+	case "diagnostics":
+		result = engine.Diagnostics()
 	}
 
 	data, err := json.MarshalIndent(result, "", "  ")
@@ -76,25 +78,35 @@ func parseQueryArgs(args []string) (*queryConfig, error) {
 			if i+1 >= len(args) {
 				return nil, fmt.Errorf("--find requires a search term")
 			}
-			cfg.mode = "find"
-			cfg.term = args[i+1]
+			if err := setQueryMode(cfg, "find", args[i+1]); err != nil {
+				return nil, err
+			}
 			i += 2
 		case "--callers":
 			if i+1 >= len(args) {
 				return nil, fmt.Errorf("--callers requires a symbol name")
 			}
-			cfg.mode = "callers"
-			cfg.term = args[i+1]
+			if err := setQueryMode(cfg, "callers", args[i+1]); err != nil {
+				return nil, err
+			}
 			i += 2
 		case "--dependents":
 			if i+1 >= len(args) {
 				return nil, fmt.Errorf("--dependents requires a symbol name")
 			}
-			cfg.mode = "dependents"
-			cfg.term = args[i+1]
+			if err := setQueryMode(cfg, "dependents", args[i+1]); err != nil {
+				return nil, err
+			}
 			i += 2
 		case "--orphans":
-			cfg.mode = "orphans"
+			if err := setQueryMode(cfg, "orphans", ""); err != nil {
+				return nil, err
+			}
+			i++
+		case "--diagnostics":
+			if err := setQueryMode(cfg, "diagnostics", ""); err != nil {
+				return nil, err
+			}
 			i++
 		default:
 			if strings.HasPrefix(arg, "-") {
@@ -106,7 +118,7 @@ func parseQueryArgs(args []string) (*queryConfig, error) {
 	}
 
 	if cfg.mode == "" {
-		return nil, fmt.Errorf("query requires one of: --find TERM, --callers TERM, --dependents TERM, --orphans")
+		return nil, fmt.Errorf("query requires one of: --find TERM, --callers TERM, --dependents TERM, --orphans, --diagnostics")
 	}
 	if cfg.inputFile == "" {
 		// Try to find a default analysis file
@@ -130,6 +142,15 @@ func parseQueryArgs(args []string) (*queryConfig, error) {
 	return cfg, nil
 }
 
+func setQueryMode(cfg *queryConfig, mode, term string) error {
+	if cfg.mode != "" {
+		return fmt.Errorf("query flags are mutually exclusive")
+	}
+	cfg.mode = mode
+	cfg.term = term
+	return nil
+}
+
 func showQueryHelp() {
 	fmt.Printf(`tukey query – query a pre-built analysis file
 
@@ -141,6 +162,7 @@ FLAGS:
     --callers <name>      Show all nodes that call or reference the named symbol
     --dependents <name>   Show all nodes that the named symbol depends on
     --orphans             List all orphaned nodes (no dependencies and no dependents)
+    --diagnostics         List parser and unresolved-reference diagnostics
     -h, --help            Show this help message
 
 EXAMPLES:
@@ -148,19 +170,21 @@ EXAMPLES:
     tukey query --callers "makeApiRequest" analysis.json
     tukey query --dependents "PaymentService" analysis.json
     tukey query --orphans analysis.json
+    tukey query --diagnostics analysis.json
 
 OUTPUT:
     All queries emit a JSON object to stdout:
     {
       "query":   "<mode>",
-      "term":    "<search term>",      // omitted for --orphans
+      "term":    "<search term>",      // omitted for --orphans and --diagnostics
       "count":   <int>,
       "results": [ ... ]
     }
 
-    Each result includes: id, name, type, file, line, score,
+    Symbol results include: id, name, type, file, line, score,
     dependencyCount, dependentCount. Callers and --dependents results
-    also include refType, refLines, and refCount.
+    also include refType, refLines, and refCount. Diagnostics include
+    code, severity, file, message, count, and sampled lines.
 
 `)
 }

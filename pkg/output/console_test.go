@@ -49,6 +49,9 @@ func makeDummyResult() *models.AnalysisResult {
 
 func TestConsoleFormatter_PrintSummary_NonVerbose(t *testing.T) {
 	res := makeDummyResult()
+	res.Graph.Diagnostics = []models.AnalysisDiagnostic{{
+		Code: models.DiagnosticParseError, Severity: models.DiagnosticSeverityError, Count: 1,
+	}}
 	cf := NewConsoleFormatter()
 	out := captureOutput(func() { cf.PrintSummary(res, false) })
 
@@ -57,6 +60,9 @@ func TestConsoleFormatter_PrintSummary_NonVerbose(t *testing.T) {
 	}
 	if !strings.Contains(out, "Tip: Use -v") {
 		t.Errorf("expected verbose tip in output:\n%s", out)
+	}
+	if !strings.Contains(out, "Analysis Diagnostics: 1 group(s), 1 error(s)") {
+		t.Errorf("expected diagnostic summary in output:\n%s", out)
 	}
 }
 

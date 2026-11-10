@@ -5,7 +5,6 @@ package lang
 
 import (
 	"bufio"
-	"fmt"
 	"os"
 	"regexp"
 	"strings"
@@ -642,10 +641,9 @@ func (p *PHPParser) ProcessFiles(files []models.FileInfo, progressBar *progress.
 			defer mu.Unlock()
 
 			if err != nil {
-				fmt.Printf("⚠️  Error parsing %s: %v\n", f.RelativePath, err)
-			} else {
-				parsedFiles = append(parsedFiles, parsed)
+				parsed = failedParsedFile(f, err)
 			}
+			parsedFiles = append(parsedFiles, parsed)
 			progressBar.Update(1) // always tick, even if parse fails
 		}(file)
 	}

@@ -26,6 +26,27 @@ type FileInfo struct {
 	Size         int64
 }
 
+const (
+	DiagnosticParseError          = "parse_error"
+	DiagnosticUnresolvedSource    = "unresolved_source"
+	DiagnosticUnresolvedReference = "unresolved_reference"
+	DiagnosticAmbiguousReference  = "ambiguous_reference"
+	DiagnosticSeverityError       = "error"
+	DiagnosticSeverityWarning     = "warning"
+)
+
+// AnalysisDiagnostic describes incomplete or uncertain analysis without discarding the graph.
+type AnalysisDiagnostic struct {
+	Code          string `json:"code"`
+	Severity      string `json:"severity"`
+	File          string `json:"file"`
+	Symbol        string `json:"symbol,omitempty"`
+	ReferenceType string `json:"referenceType,omitempty"`
+	Message       string `json:"message"`
+	Count         int    `json:"count"`
+	Lines         []int  `json:"lines,omitempty"`
+}
+
 // CodeElement represents any parseable element in PHP code
 type CodeElement struct {
 	Type       string   // "class", "function", "method", "property", "constant"
@@ -45,10 +66,11 @@ type CodeElement struct {
 type ParsedFile struct {
 	Path          string
 	Namespace     string
-	Uses          []string          // Import statements
-	ImportAliases map[string]string // Local import names to fully-qualified paths
-	Elements      []CodeElement     // All defined elements
-	Usage         []UsageElement    // References to other elements
+	Uses          []string             // Import statements
+	ImportAliases map[string]string    // Local import names to fully-qualified paths
+	Elements      []CodeElement        // All defined elements
+	Usage         []UsageElement       // References to other elements
+	Diagnostics   []AnalysisDiagnostic // Per-file parsing diagnostics
 }
 
 // UsageElement represents usage of external code elements
@@ -92,6 +114,7 @@ type DependencyGraph struct {
 	Orphans        []*DependencyNode          `json:"orphans"`
 	HighlyDepended []*DependencyNode          `json:"highlyDepended"`
 	ComplexNodes   []*DependencyNode          `json:"complexNodes"`
+	Diagnostics    []AnalysisDiagnostic       `json:"diagnostics"`
 	mu             sync.RWMutex
 }
 

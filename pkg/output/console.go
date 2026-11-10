@@ -31,6 +31,16 @@ func (cf *ConsoleFormatter) PrintSummary(result *models.AnalysisResult, verbose 
 	fmt.Printf("   • Total Nodes: %d\n", graph.TotalNodes)
 	fmt.Printf("   • Total Dependencies: %d\n", graph.TotalEdges)
 	fmt.Printf("   • Orphaned Elements: %d\n", len(graph.Orphans))
+	if len(graph.Diagnostics) > 0 {
+		errorCount := 0
+		for _, diagnostic := range graph.Diagnostics {
+			if diagnostic.Severity == models.DiagnosticSeverityError {
+				errorCount += diagnostic.Count
+			}
+		}
+		fmt.Printf("   • Analysis Diagnostics: %d group(s), %d error(s)\n", len(graph.Diagnostics), errorCount)
+		fmt.Printf("     Use 'tukey query --diagnostics <analysis-file>' for details\n")
+	}
 
 	// Determine how many items to show
 	maxHighlyDepended := 5

@@ -210,7 +210,7 @@ func main() {
 	totalElements := getTotalElements(parsedFiles)
 	if !argv.Benchmark {
 		fmt.Printf("✅ Parsing complete! Found %d code elements in %d files\n",
-			totalElements, len(parsedFiles))
+			totalElements, getSuccessfullyParsedCount(parsedFiles))
 	}
 
 	// Step 3: Build dependency graph
@@ -304,7 +304,7 @@ func main() {
 		runtime.ReadMemStats(&memStats)
 
 		totalSizeMB := float64(getTotalSize(files)) / (1024 * 1024)
-		filesPerSec := float64(len(parsedFiles)) / parseTime.Seconds()
+		filesPerSec := float64(getSuccessfullyParsedCount(parsedFiles)) / parseTime.Seconds()
 		mbPerSec := totalSizeMB / parseTime.Seconds()
 
 		fmt.Println()
@@ -313,8 +313,9 @@ func main() {
 		fmt.Println("======================================================================")
 		fmt.Printf("📂 Codebase Metrics:\n")
 		fmt.Printf("   • Total Discovered Files:  %d\n", len(files))
-		fmt.Printf("   • Total Parsed Files:      %d\n", len(parsedFiles))
+		fmt.Printf("   • Total Parsed Files:      %d\n", getSuccessfullyParsedCount(parsedFiles))
 		fmt.Printf("   • Total Code Elements:     %d\n", totalElements)
+		fmt.Printf("   • Analysis Diagnostics:    %d\n", len(graph.Diagnostics))
 		fmt.Printf("   • Total Codebase Size:     %.2f MB\n", totalSizeMB)
 		fmt.Println()
 		fmt.Printf("⏱️ Phase Durations:\n")
@@ -465,6 +466,7 @@ QUERY FLAGS:
     --callers <name>        Show all nodes that call or reference the named symbol
     --dependents <name>     Show all nodes that the named symbol depends on
     --orphans               List all orphaned nodes (dead code candidates)
+    --diagnostics           List parser and unresolved-reference diagnostics
 
 MCP FLAGS:
     -h, --help              Show help message for MCP subcommand
@@ -515,6 +517,23 @@ func getTotalElements(parsedFiles []*models.ParsedFile) int {
 		total += len(file.Elements)
 	}
 	return total
+}
+
+func getSuccessfullyParsedCount(parsedFiles []*models.ParsedFile) int {
+	count := 0
+	for _, file := range parsedFiles {
+		failed := false
+		for _, diagnostic := range file.Diagnostics {
+			if diagnostic.Code == models.DiagnosticParseError {
+				failed = true
+				break
+			}
+		}
+		if !failed {
+			count++
+		}
+	}
+	return count
 }
 
 // mergeConfigs merges CLI args with file config, giving CLI priority

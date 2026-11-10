@@ -13,11 +13,12 @@ import (
 
 // DependencyTracker builds dependency relationships
 type DependencyTracker struct {
-	graph          *models.DependencyGraph
-	nodeIndex      map[string][]string
-	shortNameIndex map[string][]string
-	sourceIndex    map[string]map[string][]string
-	allUsage       []models.UsageElement // Store all usage for function reporting
+	graph           *models.DependencyGraph
+	nodeIndex       map[string][]string
+	shortNameIndex  map[string][]string
+	sourceIndex     map[string]map[string][]string
+	diagnosticIndex map[string]int
+	allUsage        []models.UsageElement // Store all usage for function reporting
 }
 
 // NewDependencyTracker creates a new dependency tracker
@@ -28,11 +29,13 @@ func NewDependencyTracker() *DependencyTracker {
 			Orphans:        []*models.DependencyNode{},
 			HighlyDepended: []*models.DependencyNode{},
 			ComplexNodes:   []*models.DependencyNode{},
+			Diagnostics:    []models.AnalysisDiagnostic{},
 		},
-		nodeIndex:      make(map[string][]string),
-		shortNameIndex: make(map[string][]string),
-		sourceIndex:    make(map[string]map[string][]string),
-		allUsage:       []models.UsageElement{},
+		nodeIndex:       make(map[string][]string),
+		shortNameIndex:  make(map[string][]string),
+		sourceIndex:     make(map[string]map[string][]string),
+		diagnosticIndex: make(map[string]int),
+		allUsage:        []models.UsageElement{},
 	}
 }
 
@@ -52,8 +55,61 @@ func (dt *DependencyTracker) BuildDependencyGraph(parsedFiles []*models.ParsedFi
 	// Phase 3: Calculate metrics and analyze patterns
 	dt.calculateMetrics()
 	dt.identifyPatterns()
+	dt.sortDiagnostics()
 
 	return dt.graph
+}
+
+func (dt *DependencyTracker) collectFileDiagnostics(file *models.ParsedFile) {
+	for _, diagnostic := range file.Diagnostics {
+		if diagnostic.Count == 0 {
+			diagnostic.Count = 1
+		}
+		dt.graph.Diagnostics = append(dt.graph.Diagnostics, diagnostic)
+	}
+}
+
+func (dt *DependencyTracker) recordResolutionDiagnostic(code string, file *models.ParsedFile, usage models.UsageElement, symbol, message string) {
+	key := strings.Join([]string{code, file.Path, symbol, usage.Type}, "\x00")
+	if index, ok := dt.diagnosticIndex[key]; ok {
+		diagnostic := &dt.graph.Diagnostics[index]
+		diagnostic.Count++
+		if usage.Line > 0 && len(diagnostic.Lines) < 20 {
+			diagnostic.Lines = append(diagnostic.Lines, usage.Line)
+		}
+		return
+	}
+
+	diagnostic := models.AnalysisDiagnostic{
+		Code:          code,
+		Severity:      models.DiagnosticSeverityWarning,
+		File:          file.Path,
+		Symbol:        symbol,
+		ReferenceType: usage.Type,
+		Message:       message,
+		Count:         1,
+	}
+	if usage.Line > 0 {
+		diagnostic.Lines = []int{usage.Line}
+	}
+	dt.diagnosticIndex[key] = len(dt.graph.Diagnostics)
+	dt.graph.Diagnostics = append(dt.graph.Diagnostics, diagnostic)
+}
+
+func (dt *DependencyTracker) sortDiagnostics() {
+	sort.Slice(dt.graph.Diagnostics, func(i, j int) bool {
+		a, b := dt.graph.Diagnostics[i], dt.graph.Diagnostics[j]
+		if a.File != b.File {
+			return a.File < b.File
+		}
+		if a.Code != b.Code {
+			return a.Code < b.Code
+		}
+		if a.Symbol != b.Symbol {
+			return a.Symbol < b.Symbol
+		}
+		return a.ReferenceType < b.ReferenceType
+	})
 }
 
 // createNodes builds all nodes and indexes from parsed files
@@ -62,6 +118,7 @@ func (dt *DependencyTracker) createNodes(parsedFiles []*models.ParsedFile) {
 	defer dt.graph.Unlock()
 
 	for _, file := range parsedFiles {
+		dt.collectFileDiagnostics(file)
 		if dt.sourceIndex[file.Path] == nil {
 			dt.sourceIndex[file.Path] = make(map[string][]string)
 		}
@@ -150,17 +207,26 @@ func (dt *DependencyTracker) processImports(file *models.ParsedFile) {
 // createDependency establishes a dependency relationship
 func (dt *DependencyTracker) createDependency(usage models.UsageElement, file *models.ParsedFile) {
 	if usage.Context == "" {
+		dt.recordResolutionDiagnostic(models.DiagnosticUnresolvedSource, file, usage, "", "Reference has no enclosing source context")
 		return
 	}
 
 	sourceNode := dt.findSourceNode(file.Path, usage.Context)
 	if sourceNode == nil {
+		dt.recordResolutionDiagnostic(models.DiagnosticUnresolvedSource, file, usage, usage.Context, "Source context could not be resolved uniquely")
 		return
 	}
 
-	targetNodeID := dt.findTargetNode(usage.Name, usage.Type, file, sourceNode)
+	targetNodeID, ambiguous := dt.findTargetNode(usage.Name, usage.Type, file, sourceNode)
 	if targetNodeID == "" {
-		return // External, unresolved, or ambiguous dependency
+		code := models.DiagnosticUnresolvedReference
+		message := "Reference could not be resolved to an internal symbol"
+		if ambiguous {
+			code = models.DiagnosticAmbiguousReference
+			message = "Reference matched multiple internal symbols"
+		}
+		dt.recordResolutionDiagnostic(code, file, usage, usage.Name, message)
+		return
 	}
 
 	targetNode := dt.graph.Nodes[targetNodeID]
@@ -193,12 +259,12 @@ func (dt *DependencyTracker) findSourceNode(filePath, context string) *models.De
 
 // createImportDependency handles import-based dependencies
 func (dt *DependencyTracker) createImportDependency(element models.CodeElement, importPath string) {
-	sourceNodeID := dt.uniqueNode([]string{symbolKey(element.Namespace, "", element.Name)}, "imports")
+	sourceNodeID, _ := dt.uniqueNode([]string{symbolKey(element.Namespace, "", element.Name)}, "imports")
 	if sourceNodeID == "" {
 		return
 	}
 
-	targetNodeID := dt.uniqueNode([]string{importPath}, "imports")
+	targetNodeID, _ := dt.uniqueNode([]string{importPath}, "imports")
 	if targetNodeID == "" {
 		return
 	}
@@ -247,7 +313,7 @@ func (dt *DependencyTracker) addDependencyRef(source, target *models.DependencyN
 }
 
 // findTargetNode locates an unambiguous target using qualified names, imports, and scope.
-func (dt *DependencyTracker) findTargetNode(name, usageType string, file *models.ParsedFile, sourceNode *models.DependencyNode) string {
+func (dt *DependencyTracker) findTargetNode(name, usageType string, file *models.ParsedFile, sourceNode *models.DependencyNode) (string, bool) {
 	if qualifiedClass, memberName, ok := strings.Cut(name, "::"); ok {
 		if strings.HasPrefix(memberName, "$") {
 			usageType = "property"
@@ -295,35 +361,35 @@ func (dt *DependencyTracker) findTargetNode(name, usageType string, file *models
 		return dt.uniqueNode([]string{imported}, usageType)
 	}
 	if strings.Contains(name, "\\") {
-		if nodeID := dt.firstUniqueNode(usageType,
+		if nodeID, ambiguous := dt.firstUniqueNode(usageType,
 			[]string{symbolKey(file.Namespace, "", name)},
 			[]string{name},
-		); nodeID != "" {
-			return nodeID
+		); nodeID != "" || ambiguous {
+			return nodeID, ambiguous
 		}
-	} else if nodeID := dt.firstUniqueNode(usageType,
+	} else if nodeID, ambiguous := dt.firstUniqueNode(usageType,
 		[]string{symbolKey(file.Namespace, "", name)},
 		[]string{name},
-	); nodeID != "" {
-		return nodeID
+	); nodeID != "" || ambiguous {
+		return nodeID, ambiguous
 	}
 	return dt.uniqueCandidates(dt.shortNameIndex[name], usageType)
 }
 
-func (dt *DependencyTracker) firstUniqueNode(usageType string, keyGroups ...[]string) string {
+func (dt *DependencyTracker) firstUniqueNode(usageType string, keyGroups ...[]string) (string, bool) {
 	for _, keys := range keyGroups {
 		candidates := dt.matchingCandidates(keys, usageType)
 		if len(candidates) > 1 {
-			return ""
+			return "", true
 		}
 		if len(candidates) == 1 {
-			return candidates[0]
+			return candidates[0], false
 		}
 	}
-	return ""
+	return "", false
 }
 
-func (dt *DependencyTracker) uniqueNode(keys []string, usageType string) string {
+func (dt *DependencyTracker) uniqueNode(keys []string, usageType string) (string, bool) {
 	return dt.uniqueCandidates(dt.matchingCandidates(keys, usageType), usageType)
 }
 
@@ -342,7 +408,7 @@ func (dt *DependencyTracker) matchingCandidates(keys []string, usageType string)
 	return candidates
 }
 
-func (dt *DependencyTracker) uniqueCandidates(candidates []string, usageType string) string {
+func (dt *DependencyTracker) uniqueCandidates(candidates []string, usageType string) (string, bool) {
 	var match string
 	for _, nodeID := range candidates {
 		node := dt.graph.Nodes[nodeID]
@@ -350,11 +416,11 @@ func (dt *DependencyTracker) uniqueCandidates(candidates []string, usageType str
 			continue
 		}
 		if match != "" {
-			return ""
+			return "", true
 		}
 		match = nodeID
 	}
-	return match
+	return match, false
 }
 
 func matchesUsageType(nodeType, usageType string) bool {

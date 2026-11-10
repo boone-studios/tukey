@@ -196,6 +196,13 @@ func (s *Server) dispatch(method string, params json.RawMessage) (interface{}, *
 					},
 				},
 				{
+					Name:        "tukey_get_analysis_diagnostics",
+					Description: "List parser errors and unresolved or ambiguous references that make the analysis incomplete.",
+					InputSchema: InputSchema{
+						Type: "object",
+					},
+				},
+				{
 					Name:        "tukey_get_localized_context",
 					Description: "Get a minimized localized context graph around a target symbol, returning its direct dependencies and dependents up to a specified depth limit.",
 					InputSchema: InputSchema{
@@ -305,6 +312,14 @@ func (s *Server) handleToolCall(name string, args json.RawMessage) (string, bool
 
 	case "tukey_find_orphans":
 		result := s.engine.Orphans()
+		data, err := json.MarshalIndent(result, "", "  ")
+		if err != nil {
+			return fmt.Sprintf("Error encoding result: %v", err), true
+		}
+		return string(data), false
+
+	case "tukey_get_analysis_diagnostics":
+		result := s.engine.Diagnostics()
 		data, err := json.MarshalIndent(result, "", "  ")
 		if err != nil {
 			return fmt.Sprintf("Error encoding result: %v", err), true

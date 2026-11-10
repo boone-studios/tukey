@@ -39,6 +39,13 @@ type QueryResult struct {
 	Results []NodeResult `json:"results"`
 }
 
+// DiagnosticsResult is the JSON envelope returned for analysis diagnostics.
+type DiagnosticsResult struct {
+	Query   string                      `json:"query"`
+	Count   int                         `json:"count"`
+	Results []models.AnalysisDiagnostic `json:"results"`
+}
+
 // Engine queries a pre-built Tukey analysis file without re-running analysis
 type Engine struct {
 	graph *models.DependencyGraph
@@ -158,6 +165,27 @@ func (e *Engine) Orphans() QueryResult {
 	}
 	sortResults(results)
 	return QueryResult{Query: "orphans", Count: len(results), Results: coalesce(results)}
+}
+
+// Diagnostics returns parser and resolution diagnostics for the loaded analysis.
+func (e *Engine) Diagnostics() DiagnosticsResult {
+	results := append([]models.AnalysisDiagnostic(nil), e.graph.Diagnostics...)
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].File != results[j].File {
+			return results[i].File < results[j].File
+		}
+		if results[i].Code != results[j].Code {
+			return results[i].Code < results[j].Code
+		}
+		if results[i].Symbol != results[j].Symbol {
+			return results[i].Symbol < results[j].Symbol
+		}
+		return results[i].ReferenceType < results[j].ReferenceType
+	})
+	if results == nil {
+		results = []models.AnalysisDiagnostic{}
+	}
+	return DiagnosticsResult{Query: "diagnostics", Count: len(results), Results: results}
 }
 
 // getNodeNames returns all possible candidate names for a node to match against

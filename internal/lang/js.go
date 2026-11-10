@@ -316,9 +316,10 @@ func (p *JSParser) ProcessFiles(files []models.FileInfo, progressBar *progress.P
 			mu.Lock()
 			defer mu.Unlock()
 
-			if err == nil {
-				parsedFiles = append(parsedFiles, parsed)
+			if err != nil {
+				parsed = failedParsedFile(f, err)
 			}
+			parsedFiles = append(parsedFiles, parsed)
 			progressBar.Update(1)
 		}(file)
 	}

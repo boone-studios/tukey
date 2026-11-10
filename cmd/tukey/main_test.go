@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/boone-studios/tukey/internal/config"
+	"github.com/boone-studios/tukey/internal/models"
 )
 
 func captureOutput(f func()) string {
@@ -151,6 +152,33 @@ func TestParseQueryArgs_Orphans(t *testing.T) {
 	}
 	if cfg.term != "" {
 		t.Errorf("term should be empty for --orphans")
+	}
+}
+
+func TestParseQueryArgs_Diagnostics(t *testing.T) {
+	cfg, err := parseQueryArgs([]string{"--diagnostics", "analysis.json"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.mode != "diagnostics" || cfg.inputFile != "analysis.json" {
+		t.Fatalf("unexpected diagnostics config: %+v", cfg)
+	}
+}
+
+func TestParseQueryArgs_MutuallyExclusiveModes(t *testing.T) {
+	_, err := parseQueryArgs([]string{"--find", "User", "--diagnostics", "analysis.json"})
+	if err == nil {
+		t.Fatal("expected mutually exclusive query modes to fail")
+	}
+}
+
+func TestSuccessfullyParsedCount(t *testing.T) {
+	files := []*models.ParsedFile{
+		{Path: "valid.go"},
+		{Path: "broken.go", Diagnostics: []models.AnalysisDiagnostic{{Code: models.DiagnosticParseError}}},
+	}
+	if got := getSuccessfullyParsedCount(files); got != 1 {
+		t.Fatalf("expected one successfully parsed file, got %d", got)
 	}
 }
 
