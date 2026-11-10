@@ -5,7 +5,6 @@ package lang
 
 import (
 	"bufio"
-	"fmt"
 	"os"
 	"regexp"
 	"strings"
@@ -74,7 +73,7 @@ func NewPHPParser() *PHPParser {
 		staticCallPattern: regexp.MustCompile(`([A-Za-z_][A-Za-z0-9_]*)::(\$?[A-Za-z_][A-Za-z0-9_]*)`),
 
 		// Method calls: $user->getName(), $this->property
-		methodCallPattern: regexp.MustCompile(`\$[A-Za-z_][A-Za-z0-9_]*->(\$?[A-Za-z_][A-Za-z0-9_]*)`),
+		methodCallPattern: regexp.MustCompile(`(\$[A-Za-z_][A-Za-z0-9_]*)->(\$?[A-Za-z_][A-Za-z0-9_]*)`),
 
 		// New instances: new User(), new \App\Models\User()
 		newInstancePattern: regexp.MustCompile(`new\s+([A-Za-z_\\][A-Za-z0-9_\\]*)`),
@@ -96,10 +95,11 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 	defer file.Close()
 
 	parsed := &models.ParsedFile{
-		Path:     filePath,
-		Elements: []models.CodeElement{},
-		Usage:    []models.UsageElement{},
-		Uses:     []string{},
+		Path:          filePath,
+		Elements:      []models.CodeElement{},
+		Usage:         []models.UsageElement{},
+		Uses:          []string{},
+		ImportAliases: make(map[string]string),
 	}
 
 	scanner := bufio.NewScanner(file)
@@ -107,6 +107,10 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 	inClass := ""
 	inFunction := ""
 	braceDepth := 0
+	classDepth := 0
+	functionDepth := 0
+	classAwaitingBrace := false
+	functionAwaitingBrace := false
 	inMultiLineComment := false
 
 	for scanner.Scan() {
@@ -142,7 +146,16 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 		// Track brace depth to know when we exit classes/functions.
 		// Strip string and comment literals to avoid false positives.
 		cleanLine := stripCommentsAndStrings(line)
+		previousBraceDepth := braceDepth
 		braceDepth += strings.Count(cleanLine, "{") - strings.Count(cleanLine, "}")
+		if classAwaitingBrace && strings.Contains(cleanLine, "{") {
+			classDepth = previousBraceDepth + 1
+			classAwaitingBrace = false
+		}
+		if functionAwaitingBrace && strings.Contains(cleanLine, "{") {
+			functionDepth = previousBraceDepth + 1
+			functionAwaitingBrace = false
+		}
 
 		// Parse namespace
 		if matches := p.namespacePattern.FindStringSubmatch(line); matches != nil {
@@ -152,7 +165,7 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 		// Parse use statements (only at top-level, outside classes/interfaces/traits/enums)
 		if inClass == "" {
 			if matches := p.usePattern.FindStringSubmatch(line); matches != nil {
-				parsed.Uses = append(parsed.Uses, matches[1])
+				recordPHPImport(parsed, matches[1], matches[2])
 			} else if strings.HasPrefix(trimmedLine, "use ") && strings.Contains(trimmedLine, "{") && strings.Contains(trimmedLine, "}") && strings.HasSuffix(trimmedLine, ";") {
 				// Group use statement: e.g. use App\Models\{User, Order, Payment};
 				code := trimmedLine[4 : len(trimmedLine)-1] // e.g. "App\Models\{User, Order, Payment}"
@@ -170,15 +183,18 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 						if part == "" {
 							continue
 						}
-						// Handle aliases in group use: e.g. "Order as ClientOrder"
+						alias := ""
 						if idx := strings.Index(strings.ToLower(part), " as "); idx != -1 {
+							alias = strings.TrimSpace(part[idx+4:])
 							part = strings.TrimSpace(part[:idx])
 						}
-						parsed.Uses = append(parsed.Uses, prefix+part)
+						recordPHPImport(parsed, prefix+part, alias)
 					}
 				}
 			}
 		}
+
+		previousInClass := inClass
 
 		// Parse class declaration
 		if matches := p.classPattern.FindStringSubmatch(line); matches != nil {
@@ -292,6 +308,12 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 			}
 		}
 
+		if inClass != "" && inClass != previousInClass {
+			inFunction = ""
+			functionAwaitingBrace = false
+			openPHPScope(&classAwaitingBrace, &classDepth, cleanLine, previousBraceDepth)
+		}
+
 		// Parse trait uses inside class/enum/interface/trait body
 		if inClass != "" {
 			if matches := p.traitUsePattern.FindStringSubmatch(line); matches != nil {
@@ -334,6 +356,11 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 				}
 				parsed.Elements = append(parsed.Elements, element)
 				inFunction = matches[4]
+				openPHPScope(&functionAwaitingBrace, &functionDepth, cleanLine, previousBraceDepth)
+				if functionAwaitingBrace && strings.HasSuffix(strings.TrimSpace(cleanLine), ";") {
+					inFunction = ""
+					functionAwaitingBrace = false
+				}
 			}
 		}
 
@@ -351,6 +378,11 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 				}
 				parsed.Elements = append(parsed.Elements, element)
 				inFunction = matches[1]
+				openPHPScope(&functionAwaitingBrace, &functionDepth, cleanLine, previousBraceDepth)
+				if functionAwaitingBrace && strings.HasSuffix(strings.TrimSpace(cleanLine), ";") {
+					inFunction = ""
+					functionAwaitingBrace = false
+				}
 			}
 		}
 
@@ -393,20 +425,39 @@ func (p *PHPParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 		// Parse usage patterns
 		p.parseUsage(line, lineNum, inFunction, inClass, parsed)
 
-		// Reset context when exiting classes/functions
-		if braceDepth == 0 {
+		// Reset each context at its own closing brace.
+		if inFunction != "" && !functionAwaitingBrace && functionDepth > 0 && braceDepth < functionDepth {
+			inFunction = ""
+			functionDepth = 0
+		}
+		if inClass != "" && !classAwaitingBrace && classDepth > 0 && braceDepth < classDepth {
 			inClass = ""
 			inFunction = ""
+			classDepth = 0
+			functionDepth = 0
+			functionAwaitingBrace = false
 		}
 	}
 
 	return parsed, scanner.Err()
 }
 
+func openPHPScope(awaitingBrace *bool, depth *int, cleanLine string, previousDepth int) {
+	if strings.Contains(cleanLine, "{") {
+		*awaitingBrace = false
+		*depth = previousDepth + 1
+		return
+	}
+	*awaitingBrace = true
+	*depth = 0
+}
+
 // parseUsage finds references to external code elements
 func (p *PHPParser) parseUsage(line string, lineNum int, inFunction, inClass string, parsed *models.ParsedFile) {
 	context := inFunction
-	if context == "" {
+	if inFunction != "" && inClass != "" {
+		context = inClass + "::" + inFunction
+	} else if context == "" {
 		context = inClass
 	}
 
@@ -428,9 +479,13 @@ func (p *PHPParser) parseUsage(line string, lineNum int, inFunction, inClass str
 	methodMatches := p.methodCallPattern.FindAllStringSubmatch(line, -1)
 	for i := 0; i < len(methodMatches); i++ {
 		match := methodMatches[i]
+		name := match[2]
+		if match[1] == "$this" && inClass != "" {
+			name = inClass + "::" + name
+		}
 		usage := models.UsageElement{
 			Type:    "method_call",
-			Name:    match[1],
+			Name:    name,
 			Context: context,
 			Line:    lineNum,
 		}
@@ -532,6 +587,15 @@ func (p *PHPParser) isBuiltinFunction(funcName string) bool {
 	return builtins[strings.ToLower(funcName)]
 }
 
+func recordPHPImport(parsed *models.ParsedFile, importPath, alias string) {
+	parsed.Uses = append(parsed.Uses, importPath)
+	if alias == "" {
+		parts := strings.Split(strings.Trim(importPath, "\\"), "\\")
+		alias = parts[len(parts)-1]
+	}
+	parsed.ImportAliases[alias] = importPath
+}
+
 // parseParameters extracts parameter names from function signature
 func parseParameters(paramStr string) []string {
 	if paramStr == "" {
@@ -627,10 +691,9 @@ func (p *PHPParser) ProcessFiles(files []models.FileInfo, progressBar *progress.
 			defer mu.Unlock()
 
 			if err != nil {
-				fmt.Printf("⚠️  Error parsing %s: %v\n", f.RelativePath, err)
-			} else {
-				parsedFiles = append(parsedFiles, parsed)
+				parsed = failedParsedFile(f, err)
 			}
+			parsedFiles = append(parsedFiles, parsed)
 			progressBar.Update(1) // always tick, even if parse fails
 		}(file)
 	}

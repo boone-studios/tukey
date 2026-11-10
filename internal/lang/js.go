@@ -204,7 +204,9 @@ func (p *JSParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 
 func (p *JSParser) parseUsage(line string, lineNum int, inFunction, inClass string, parsed *models.ParsedFile) {
 	context := inFunction
-	if context == "" {
+	if inFunction != "" && inClass != "" {
+		context = inClass + "::" + inFunction
+	} else if context == "" {
 		context = inClass
 	}
 
@@ -316,9 +318,10 @@ func (p *JSParser) ProcessFiles(files []models.FileInfo, progressBar *progress.P
 			mu.Lock()
 			defer mu.Unlock()
 
-			if err == nil {
-				parsedFiles = append(parsedFiles, parsed)
+			if err != nil {
+				parsed = failedParsedFile(f, err)
 			}
+			parsedFiles = append(parsedFiles, parsed)
 			progressBar.Update(1)
 		}(file)
 	}

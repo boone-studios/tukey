@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/boone-studios/tukey/internal/parser"
 	"github.com/boone-studios/tukey/internal/progress"
 	"github.com/boone-studios/tukey/internal/scanner"
+	"github.com/boone-studios/tukey/internal/source"
 	"github.com/boone-studios/tukey/pkg/compare"
 	"github.com/boone-studios/tukey/pkg/guard"
 	"github.com/boone-studios/tukey/pkg/output"
@@ -102,6 +104,7 @@ func main() {
 	// Resolve active languages and merge file extensions
 	langParts := strings.Split(argv.Language, ",")
 	var activeParsers []parser.LanguageParser
+	var activeLanguages []string
 	var mergedExtensions []string
 
 	for _, part := range langParts {
@@ -116,6 +119,7 @@ func main() {
 			os.Exit(1)
 		}
 		activeParsers = append(activeParsers, p)
+		activeLanguages = append(activeLanguages, langKey)
 		mergedExtensions = append(mergedExtensions, p.FileExtensions()...)
 	}
 
@@ -210,7 +214,7 @@ func main() {
 	totalElements := getTotalElements(parsedFiles)
 	if !argv.Benchmark {
 		fmt.Printf("✅ Parsing complete! Found %d code elements in %d files\n",
-			totalElements, len(parsedFiles))
+			totalElements, getSuccessfullyParsedCount(parsedFiles))
 	}
 
 	// Step 3: Build dependency graph
@@ -281,6 +285,16 @@ func main() {
 		}
 
 		exportStart := time.Now()
+		metadata, err := buildAnalysisMetadata(argv, activeLanguages, mergedExtensions, files)
+		if err != nil {
+			if exportSpinner != nil {
+				exportSpinner.Stop()
+			}
+			fmt.Fprintf(os.Stderr, "❌ Error collecting source metadata: %v\n", err)
+			os.Exit(1)
+		}
+		result.Metadata = metadata
+
 		exporter := output.NewJSONExporter()
 		if err := exporter.Export(result, argv.OutputFile); err != nil {
 			if exportSpinner != nil {
@@ -304,7 +318,7 @@ func main() {
 		runtime.ReadMemStats(&memStats)
 
 		totalSizeMB := float64(getTotalSize(files)) / (1024 * 1024)
-		filesPerSec := float64(len(parsedFiles)) / parseTime.Seconds()
+		filesPerSec := float64(getSuccessfullyParsedCount(parsedFiles)) / parseTime.Seconds()
 		mbPerSec := totalSizeMB / parseTime.Seconds()
 
 		fmt.Println()
@@ -313,8 +327,9 @@ func main() {
 		fmt.Println("======================================================================")
 		fmt.Printf("📂 Codebase Metrics:\n")
 		fmt.Printf("   • Total Discovered Files:  %d\n", len(files))
-		fmt.Printf("   • Total Parsed Files:      %d\n", len(parsedFiles))
+		fmt.Printf("   • Total Parsed Files:      %d\n", getSuccessfullyParsedCount(parsedFiles))
 		fmt.Printf("   • Total Code Elements:     %d\n", totalElements)
+		fmt.Printf("   • Analysis Diagnostics:    %d\n", len(graph.Diagnostics))
 		fmt.Printf("   • Total Codebase Size:     %.2f MB\n", totalSizeMB)
 		fmt.Println()
 		fmt.Printf("⏱️ Phase Durations:\n")
@@ -465,6 +480,8 @@ QUERY FLAGS:
     --callers <name>        Show all nodes that call or reference the named symbol
     --dependents <name>     Show all nodes that the named symbol depends on
     --orphans               List all orphaned nodes (dead code candidates)
+    --diagnostics           List parser and unresolved-reference diagnostics
+    --status                Check source freshness against the analysis snapshot
 
 MCP FLAGS:
     -h, --help              Show help message for MCP subcommand
@@ -515,6 +532,63 @@ func getTotalElements(parsedFiles []*models.ParsedFile) int {
 		total += len(file.Elements)
 	}
 	return total
+}
+
+func buildAnalysisMetadata(argv *Config, languages, extensions []string, files []models.FileInfo) (models.AnalysisMetadata, error) {
+	rootPath, err := filepath.Abs(argv.RootPath)
+	if err != nil {
+		return models.AnalysisMetadata{}, err
+	}
+	snapshot, err := source.Snapshot(files)
+	if err != nil {
+		return models.AnalysisMetadata{}, err
+	}
+
+	extensionSet := make(map[string]bool)
+	for _, extension := range extensions {
+		extensionSet[strings.ToLower(extension)] = true
+	}
+	uniqueExtensions := make([]string, 0, len(extensionSet))
+	for extension := range extensionSet {
+		uniqueExtensions = append(uniqueExtensions, extension)
+	}
+	sort.Strings(uniqueExtensions)
+
+	languages = append([]string(nil), languages...)
+	sort.Strings(languages)
+	excludeDirs := append([]string(nil), argv.ExcludeDirs...)
+	sort.Strings(excludeDirs)
+
+	return models.AnalysisMetadata{
+		SchemaVersion: models.AnalysisSchemaVersion,
+		Generator: models.GeneratorMetadata{
+			Name:    "tukey",
+			Version: version,
+		},
+		GeneratedAt:    time.Now().UTC().Format(time.RFC3339),
+		RootPath:       rootPath,
+		Languages:      languages,
+		ExcludeDirs:    excludeDirs,
+		FileExtensions: uniqueExtensions,
+		SourceFiles:    snapshot,
+	}, nil
+}
+
+func getSuccessfullyParsedCount(parsedFiles []*models.ParsedFile) int {
+	count := 0
+	for _, file := range parsedFiles {
+		failed := false
+		for _, diagnostic := range file.Diagnostics {
+			if diagnostic.Code == models.DiagnosticParseError {
+				failed = true
+				break
+			}
+		}
+		if !failed {
+			count++
+		}
+	}
+	return count
 }
 
 // mergeConfigs merges CLI args with file config, giving CLI priority

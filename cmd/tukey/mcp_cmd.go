@@ -93,6 +93,11 @@ DESCRIPTION:
       - tukey_get_callers: Trace who calls a symbol
       - tukey_get_dependents: Trace what a symbol depends on
       - tukey_find_orphans: Trace dead/unused code candidates
+      - tukey_get_analysis_diagnostics: Inspect parser and reference-resolution diagnostics
+      - tukey_get_analysis_status: Check source freshness against the analysis snapshot
+
+    List responses accept limit (default 50, maximum 100 per collection) and cursor.
+    Follow page.nextCursor to continue. Localized context depth is capped at 5.
 
 EXAMPLES:
     tukey mcp analysis.json

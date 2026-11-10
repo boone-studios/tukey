@@ -6,6 +6,7 @@ package mcp
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -200,8 +201,16 @@ func TestMCPServer_ToolsList(t *testing.T) {
 		t.Fatalf("tools is not a slice: %T", resultMap["tools"])
 	}
 
-	if len(tools) != 5 {
-		t.Errorf("expected 5 tools, got %d", len(tools))
+	if len(tools) != 7 {
+		t.Errorf("expected 7 tools, got %d", len(tools))
+	}
+	for _, rawTool := range tools {
+		tool := rawTool.(map[string]interface{})
+		schema := tool["inputSchema"].(map[string]interface{})
+		properties := schema["properties"].(map[string]interface{})
+		if properties["limit"] == nil || properties["cursor"] == nil {
+			t.Errorf("tool %s lacks pagination properties", tool["name"])
+		}
 	}
 }
 
@@ -239,8 +248,18 @@ func TestMCPServer_ToolCalls(t *testing.T) {
 			wantResult: `"deadHelper"`,
 		},
 		{
+			name:       "Get Analysis Diagnostics",
+			request:    `{"jsonrpc":"2.0","method":"tools/call","id":15,"params":{"name":"tukey_get_analysis_diagnostics","arguments":{}}}` + "\n",
+			wantResult: `"query": "diagnostics"`,
+		},
+		{
+			name:       "Get Analysis Status",
+			request:    `{"jsonrpc":"2.0","method":"tools/call","id":16,"params":{"name":"tukey_get_analysis_status","arguments":{}}}` + "\n",
+			wantResult: `"status": "unknown"`,
+		},
+		{
 			name:       "Get Localized Context",
-			request:    `{"jsonrpc":"2.0","method":"tools/call","id":15,"params":{"name":"tukey_get_localized_context","arguments":{"symbol":"GatewayFactory","depth":1}}}` + "\n",
+			request:    `{"jsonrpc":"2.0","method":"tools/call","id":17,"params":{"name":"tukey_get_localized_context","arguments":{"symbol":"GatewayFactory","depth":1}}}` + "\n",
 			wantResult: `"HttpClient"`,
 		},
 	}
@@ -286,6 +305,72 @@ func TestMCPServer_ToolCalls(t *testing.T) {
 				t.Errorf("Result text: got %q want substring %q", text, tt.wantResult)
 			}
 		})
+	}
+}
+
+func TestMCPServer_Pagination(t *testing.T) {
+	graph := &models.DependencyGraph{Nodes: make(map[string]*models.DependencyNode)}
+	for i := 0; i < 60; i++ {
+		node := &models.DependencyNode{
+			ID: fmt.Sprintf("function:Node%02d", i), Name: fmt.Sprintf("Node%02d", i),
+			Type: "function", File: "nodes.php", Line: i + 1,
+			Dependencies: map[string]*models.DependencyRef{}, Dependents: map[string]*models.DependencyRef{},
+		}
+		graph.Nodes[node.ID] = node
+	}
+	data, err := json.Marshal(map[string]interface{}{"graph": graph})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := NewServer(parseEngineFromJSON(data), nil, nil)
+
+	text, isErr := server.handleToolCall("tukey_find_symbol", json.RawMessage(`{"term":"Node","limit":2}`))
+	if isErr {
+		t.Fatalf("unexpected tool error: %s", text)
+	}
+	var first query.QueryResult
+	if err := json.Unmarshal([]byte(text), &first); err != nil {
+		t.Fatal(err)
+	}
+	if first.Count != 2 || first.Page == nil || first.Page.Total != 60 || first.Page.NextCursor == "" {
+		t.Fatalf("unexpected first MCP page: %+v", first)
+	}
+
+	nextArgs, _ := json.Marshal(map[string]interface{}{
+		"term": "Node", "limit": 2, "cursor": first.Page.NextCursor,
+	})
+	text, isErr = server.handleToolCall("tukey_find_symbol", nextArgs)
+	if isErr {
+		t.Fatalf("unexpected continuation error: %s", text)
+	}
+	var second query.QueryResult
+	if err := json.Unmarshal([]byte(text), &second); err != nil {
+		t.Fatal(err)
+	}
+	if second.Count != 2 || second.Results[0].ID == first.Results[0].ID {
+		t.Fatalf("cursor did not advance MCP results: %+v", second)
+	}
+
+	text, isErr = server.handleToolCall("tukey_find_symbol", json.RawMessage(`{"term":"Node","limit":-1}`))
+	if !isErr || !strings.Contains(text, "limit must not be negative") {
+		t.Fatalf("expected negative limit error, got %s", text)
+	}
+
+	invalidLimits := []struct {
+		name string
+		args string
+	}{
+		{name: "tukey_find_symbol", args: `{"term":"Node","limit":"two"}`},
+		{name: "tukey_get_callers", args: `{"symbol":"Node","limit":"two"}`},
+		{name: "tukey_get_dependents", args: `{"symbol":"Node","limit":"two"}`},
+		{name: "tukey_find_orphans", args: `{"limit":"two"}`},
+		{name: "tukey_get_localized_context", args: `{"symbol":"Node","limit":"two"}`},
+	}
+	for _, tt := range invalidLimits {
+		text, isErr = server.handleToolCall(tt.name, json.RawMessage(tt.args))
+		if !isErr || !strings.Contains(text, "limit") || !strings.Contains(text, "cannot unmarshal") {
+			t.Errorf("%s should report the invalid limit type, got %s", tt.name, text)
+		}
 	}
 }
 

@@ -120,11 +120,11 @@ func MyFunction() {
 	for _, u := range parsed.Usage {
 		// MyMethod call on s (which was inferred to MyStruct)
 		if u.Type == "method_call" && u.Name == "github.com/boone-studios/tukey\\MyStruct::MyMethod" {
-			foundMethodCall = true
+			foundMethodCall = u.Context == "MyFunction"
 		}
 		// fmt.Println call
 		if u.Type == "function" && u.Name == "fmt\\Println" {
-			foundFuncCall = true
+			foundFuncCall = u.Context == "MyStruct::MyMethod"
 		}
 	}
 

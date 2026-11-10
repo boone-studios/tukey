@@ -122,7 +122,7 @@ If you prefer JSON, you can use a `.tukey.json` file instead.
 
 ## AI Agent Integration (Tukey Skill & MCP Server)
 
-Tukey is natively designed to act as a **machine-readable codebase map for AI agents** (like Codex, Gemini, Claude, Cursor, Grok, and other agentic coding assistants). If you are using AI agents to explore or edit your codebase, Tukey offers two integration pathways:
+Tukey is natively designed to act as a **machine-readable codebase map for AI agents** (like Codex, Gemini, Claude, Cursor, Kimi Code, Grok, and other agentic coding assistants). If you are using AI agents to explore or edit your codebase, Tukey offers two integration pathways:
 
 To install Tukey's MCP server configuration and skill file for a supported agent, use:
 
@@ -131,10 +131,11 @@ tukey agent --agent codex
 tukey agent --agent claude
 tukey agent --agent antigravity
 tukey agent --agent cursor
+tukey agent --agent kimi
 tukey agent --agent grok
 ```
 
-Add `--global` to install into the agent's global settings instead of the current project.
+Add `--global` to install into the agent's global settings instead of the current project. Every supported agent receives both MCP configuration and a directory-form `SKILL.md` in its documented project or user skill location.
 
 ### 1. Native Model Context Protocol (MCP) Server
 Tukey features a built-in MCP server that communicates via JSON-RPC 2.0 over standard I/O (stdin/stdout). This allows compatible tools (e.g., Claude Code, Cursor, Grok, Zed) to invoke Tukey tools directly within the agent's tool-use loop without shell execution permissions or subprocess spawning overhead.
@@ -166,7 +167,22 @@ Exposed MCP Tools:
 - `tukey_get_callers` (args: `symbol` string) — Trace what calls/references a symbol.
 - `tukey_get_dependents` (args: `symbol` string) — Trace what a symbol depends on.
 - `tukey_find_orphans` — Identify candidate dead or orphaned code.
+- `tukey_get_analysis_diagnostics` — Inspect parser errors and unresolved or ambiguous references before trusting graph results.
+- `tukey_get_analysis_status` — Check whether source files are fresh, stale, or missing snapshot metadata.
 - `tukey_get_localized_context` (args: `symbol` string, `depth` int [optional]) — Retrieve a pruned context sub-graph (containing targets, dependencies, and dependents) around a symbol (ideal for AI context pruning).
+
+MCP responses are paginated with `limit` (default 50, maximum 100 per collection) and an optional opaque `cursor`. Follow `page.nextCursor` with the same query arguments until it is omitted. Localized context depth is capped at 5.
+
+#### Recommended Agent Workflow
+
+1. **Generate or reuse an analysis snapshot** with `tukey -o tukey-results.json .`.
+2. **Check freshness before trusting results** using `tukey_get_analysis_status` or `tukey query --status tukey-results.json`. Regenerate stale snapshots and exports without source metadata.
+3. **Locate symbols first** with `tukey_find_symbol` or `tukey query --find`. If `resolution.ambiguous` is true, inspect the matched targets and repeat with a qualified name or exact stable ID.
+4. **Assess change impact** with caller and dependent queries. Use `relationships` to preserve each source-target pair, reference type, line, count, and traversal depth.
+5. **Check diagnostics when results are incomplete** with `tukey_get_analysis_diagnostics` or `tukey query --diagnostics`. Parser failures and unresolved or ambiguous references mean the graph may be incomplete.
+6. **Read only the relevant source, then verify normally.** Make the change, run the project's tests, and regenerate the analysis so subsequent agents start with a fresh graph.
+
+Tukey narrows code exploration but does not establish runtime correctness. Missing edges can reflect dynamic behavior or parser limitations. Orphans are investigation candidates, not automatic deletion targets: framework entry points, public APIs, and externally invoked code may have no incoming graph edges.
 
 ### 2. Tukey Command Line Skill
 You can also feed Tukey's compact query capabilities directly to LLMs as a CLI skill. For a detailed guide on CLI-based agent configurations, including circular dependency audits, performance benchmarking, and architectural layer checks, see [docs/tukey_skill.md](docs/tukey_skill.md).
@@ -227,18 +243,32 @@ Identify refactoring opportunities:
 ### JSON Export
 ```json
 {
-  "nodes": {
-    "class:App\\Models\\User:8": {
-      "id": "class:App\\Models\\User:8",
-      "name": "User",
-      "type": "class",
-      "file": "/app/Models/User.php",
-      "dependencies": {...},
-      "dependents": {...}
-    }
+  "schemaVersion": 1,
+  "generator": {"name": "tukey", "version": "0.4.0"},
+  "generatedAt": "2026-01-15T12:00:00Z",
+  "rootPath": "/absolute/path/to/project",
+  "languages": ["php"],
+  "excludeDirs": [],
+  "fileExtensions": [".php"],
+  "sourceFiles": [
+    {"path": "app/Models/User.php", "size": 2048, "sha256": "..."}
+  ],
+  "graph": {
+    "nodes": {
+      "class:App\\Models\\User": {
+        "id": "class:App\\Models\\User",
+        "name": "User",
+        "type": "class",
+        "file": "/app/Models/User.php",
+        "dependencies": {},
+        "dependents": {}
+      }
+    },
+    "totalNodes": 1284,
+    "totalEdges": 2891
   },
-  "totalNodes": 1284,
-  "totalEdges": 2891
+  "totalFiles": 100,
+  "totalElements": 1284
 }
 ```
 

@@ -260,9 +260,10 @@ func (p *GoParser) ProcessFiles(files []models.FileInfo, progressBar *progress.P
 			mu.Lock()
 			defer mu.Unlock()
 
-			if err == nil {
-				parsedFiles = append(parsedFiles, parsed)
+			if err != nil {
+				parsed = failedParsedFile(f, err)
 			}
+			parsedFiles = append(parsedFiles, parsed)
 			progressBar.Update(1)
 		}(file)
 	}
@@ -421,6 +422,9 @@ func (w *goASTWalker) Visit(node ast.Node) ast.Visitor {
 				recvName = n.Recv.List[0].Names[0].Name
 			}
 			recvType := getBaseTypeName(n.Recv.List[0].Type)
+			if recvType != "" {
+				w.currentContext = recvType + "::" + n.Name.Name
+			}
 			if recvName != "" && recvType != "" {
 				w.localTypes[recvName] = recvType
 			}

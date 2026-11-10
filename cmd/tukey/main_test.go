@@ -3,11 +3,13 @@ package main
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/boone-studios/tukey/internal/config"
+	"github.com/boone-studios/tukey/internal/models"
 )
 
 func captureOutput(f func()) string {
@@ -151,6 +153,77 @@ func TestParseQueryArgs_Orphans(t *testing.T) {
 	}
 	if cfg.term != "" {
 		t.Errorf("term should be empty for --orphans")
+	}
+}
+
+func TestParseQueryArgs_Diagnostics(t *testing.T) {
+	cfg, err := parseQueryArgs([]string{"--diagnostics", "analysis.json"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.mode != "diagnostics" || cfg.inputFile != "analysis.json" {
+		t.Fatalf("unexpected diagnostics config: %+v", cfg)
+	}
+}
+
+func TestParseQueryArgs_MutuallyExclusiveModes(t *testing.T) {
+	_, err := parseQueryArgs([]string{"--find", "User", "--diagnostics", "analysis.json"})
+	if err == nil {
+		t.Fatal("expected mutually exclusive query modes to fail")
+	}
+}
+
+func TestParseQueryArgs_Status(t *testing.T) {
+	cfg, err := parseQueryArgs([]string{"--status", "analysis.json"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.mode != "status" || cfg.inputFile != "analysis.json" {
+		t.Fatalf("unexpected status config: %+v", cfg)
+	}
+}
+
+func TestBuildAnalysisMetadata(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "main.go")
+	if err := os.WriteFile(path, []byte("package main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metadata, err := buildAnalysisMetadata(
+		&Config{RootPath: root, ExcludeDirs: []string{"vendor", "cache"}},
+		[]string{"php", "go"},
+		[]string{".php", ".go", ".go"},
+		[]models.FileInfo{{Path: path, RelativePath: "main.go", Size: info.Size()}},
+	)
+	if err != nil {
+		t.Fatalf("buildAnalysisMetadata: %v", err)
+	}
+	if metadata.SchemaVersion != models.AnalysisSchemaVersion || metadata.GeneratedAt == "" {
+		t.Fatalf("missing version or timestamp: %+v", metadata)
+	}
+	if metadata.Generator.Name != "tukey" || !filepath.IsAbs(metadata.RootPath) {
+		t.Fatalf("unexpected generator or root: %+v", metadata)
+	}
+	if !reflect.DeepEqual(metadata.Languages, []string{"go", "php"}) ||
+		!reflect.DeepEqual(metadata.FileExtensions, []string{".go", ".php"}) {
+		t.Fatalf("metadata is not normalized: %+v", metadata)
+	}
+	if len(metadata.SourceFiles) != 1 || metadata.SourceFiles[0].SHA256 == "" {
+		t.Fatalf("missing source fingerprint: %+v", metadata.SourceFiles)
+	}
+}
+
+func TestSuccessfullyParsedCount(t *testing.T) {
+	files := []*models.ParsedFile{
+		{Path: "valid.go"},
+		{Path: "broken.go", Diagnostics: []models.AnalysisDiagnostic{{Code: models.DiagnosticParseError}}},
+	}
+	if got := getSuccessfullyParsedCount(files); got != 1 {
+		t.Fatalf("expected one successfully parsed file, got %d", got)
 	}
 }
 
@@ -464,6 +537,98 @@ func TestFindAgent_Grok(t *testing.T) {
 		if agent.SkillFile != "skills/tukey/SKILL.md" {
 			t.Fatalf("Grok skill file = %q, want skills/tukey/SKILL.md", agent.SkillFile)
 		}
+	}
+}
+
+func TestInstallAgentSkillForEverySupportedAgent(t *testing.T) {
+	expectedPaths := map[string]struct {
+		project string
+		global  string
+	}{
+		"claude": {
+			project: filepath.Join(".claude", "skills", "tukey", "SKILL.md"),
+			global:  filepath.Join(".claude", "skills", "tukey", "SKILL.md"),
+		},
+		"antigravity": {
+			project: filepath.Join(".agents", "skills", "tukey", "SKILL.md"),
+			global:  filepath.Join(".gemini", "config", "skills", "tukey", "SKILL.md"),
+		},
+		"codex": {
+			project: filepath.Join(".agents", "skills", "tukey", "SKILL.md"),
+			global:  filepath.Join(".agents", "skills", "tukey", "SKILL.md"),
+		},
+		"cursor": {
+			project: filepath.Join(".cursor", "skills", "tukey", "SKILL.md"),
+			global:  filepath.Join(".cursor", "skills", "tukey", "SKILL.md"),
+		},
+		"kimi": {
+			project: filepath.Join(".kimi-code", "skills", "tukey", "SKILL.md"),
+			global:  filepath.Join(".kimi-code", "skills", "tukey", "SKILL.md"),
+		},
+		"grok": {
+			project: filepath.Join(".grok", "skills", "tukey", "SKILL.md"),
+			global:  filepath.Join(".grok", "skills", "tukey", "SKILL.md"),
+		},
+	}
+	if len(supportedAgents) != len(expectedPaths) {
+		t.Fatalf("skill path coverage has %d agents, registry has %d", len(expectedPaths), len(supportedAgents))
+	}
+
+	for _, agent := range supportedAgents {
+		expected := expectedPaths[agent.Key]
+		if expected.project == "" || expected.global == "" {
+			t.Errorf("missing expected skill paths for %s", agent.Key)
+			continue
+		}
+		if !agent.NeedsSkillFile {
+			t.Errorf("%s is registered but skips skill installation", agent.Key)
+			continue
+		}
+		if found, ok := findAgent(agent.Key); !ok || found.Key != agent.Key {
+			t.Errorf("findAgent(%q) did not resolve its registered agent", agent.Key)
+		}
+		for _, alias := range agent.Aliases {
+			if found, ok := findAgent(alias); !ok || found.Key != agent.Key {
+				t.Errorf("findAgent(%q) did not resolve %s", alias, agent.Key)
+			}
+		}
+
+		t.Run(agent.Key+"/project", func(t *testing.T) {
+			projectRoot := t.TempDir()
+			settingsBase := filepath.Join(projectRoot, agent.ProjectDir)
+			path, err := installAgentSkill(agent, projectRoot, settingsBase, false)
+			if err != nil {
+				t.Fatalf("installAgentSkill failed: %v", err)
+			}
+			want := filepath.Join(projectRoot, expected.project)
+			if path != want {
+				t.Fatalf("skill path = %q, want %q", path, want)
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("failed to read installed skill: %v", err)
+			}
+			if string(data) != tukeySkillContent {
+				t.Fatal("installed skill content differs from embedded skill")
+			}
+		})
+
+		t.Run(agent.Key+"/global", func(t *testing.T) {
+			home := t.TempDir()
+			t.Setenv("HOME", home)
+			settingsBase := filepath.Join(home, agent.GlobalDir)
+			path, err := installAgentSkill(agent, filepath.Join(home, "project"), settingsBase, true)
+			if err != nil {
+				t.Fatalf("installAgentSkill failed: %v", err)
+			}
+			want := filepath.Join(home, expected.global)
+			if path != want {
+				t.Fatalf("skill path = %q, want %q", path, want)
+			}
+			if data, err := os.ReadFile(path); err != nil || string(data) != tukeySkillContent {
+				t.Fatalf("installed global skill is missing or incorrect: %v", err)
+			}
+		})
 	}
 }
 

@@ -29,9 +29,9 @@ At a high level:
   - Parses flags, merges config, orchestrates scanning, parsing, analysis, and output.  
   - If you change user‑facing behavior or add flags, it usually happens here.
 
-- **`internal/lang`**  
-  - Language‑specific parsers (currently only PHP).  
-  - `php.go` implements `LanguageParser` and self‑registers via `parser.Register` in `init()`.  
+- **`internal/lang`**
+  - Language-specific parsers for PHP, JavaScript, and Go, plus shared parse-failure diagnostics.
+  - Each parser implements `LanguageParser` and self-registers via `parser.Register` in `init()`.
   - Add new language parsers here and keep them **stateless** except for shared regex or configuration.
 
 - **`internal/parser`**  
@@ -44,7 +44,10 @@ At a high level:
   - Handles **exclude directories** (e.g. `vendor`, `.git`, `node_modules`, plus user‑configured ones).  
   - Filters by **file extensions** configured from the selected `LanguageParser`.
 
-- **`internal/models`**  
+- **`internal/source`**
+  - Computes SHA-256 source fingerprints and deterministic file snapshots used by export metadata and freshness checks.
+
+- **`internal/models`**
   - Core data types used across the pipeline:  
     - `FileInfo`: basic file metadata.  
     - `CodeElement`: a single declared item (class, function, method, property, constant).  
@@ -58,7 +61,7 @@ At a high level:
   - `DependencyTracker` turns `ParsedFile` data into a `DependencyGraph`.  
   - Responsibilities:  
     - Create graph nodes for each `CodeElement`.  
-    - Maintain indexes (`nodeIndex`, `namespaceMap`) so usages can be resolved to targets.  
+    - Maintain qualified-name, short-name, and source-context indexes so usages can be resolved to unambiguous targets.
     - Build directed edges for calls, instantiations, and imports.  
     - Compute **complexity scores**, discover **orphans**, and identify **hotspots**.  
   - Does **not** own user‑facing formatting; it should stay data‑oriented.
@@ -169,10 +172,15 @@ The PHP analyzer is **regex‑driven**, not a full PHP AST. It focuses on the co
       - Skips built‑in PHP functions and common Laravel helpers via `isBuiltinFunction`.  
       - Skips definition lines (`function X` / `class X`) to avoid self‑references.
 
+- **Scope tracking**
+  - Class and function contexts have independent brace depths, so a method closing does not clear its enclosing class.
+  - Declarations can open on the same line or a later line; pending-open state handles next-line braces, and empty bodies close normally.
+  - Abstract/interface declarations ending in `;` do not create a function-body context.
+
 - **Concurrency**
   - `PHPParser.ProcessFiles` processes files in parallel, bounded by a semaphore.  
   - Each parsed file increments a shared progress bar, even on parse errors.  
-  - Errors are logged but do **not** abort the entire analysis.
+  - Per-file failures produce structured `parse_error` diagnostics and do **not** abort the entire analysis.
 
 When extending PHP support (e.g., better generics, traits, or more nuanced method resolution), keep the **regex approach simple** and focused on what the dependency graph needs.
 
@@ -183,21 +191,20 @@ When extending PHP support (e.g., better generics, traits, or more nuanced metho
 `DependencyTracker` converts parsed elements and usage into a scored graph:
 
 - **Node creation and indexing (`createNodes`)**
-  - For each `CodeElement` in all `ParsedFile`s, it creates a `DependencyNode` with ID:  
-    - `"<type>:<fullyQualifiedName>:<lineNumber>"` (e.g. `class:App\\Models\\User:8`).  
-  - Fills: `Name`, `Type`, `File`, `Namespace`, `ClassName`, `Line`, empty `Dependencies` and `Dependents`.  
+  - For each `CodeElement` in all `ParsedFile`s, it creates a `DependencyNode` with a line-independent ID from `models.StableSymbolID`:
+    - `"<type>:<fullyQualifiedName>"` (e.g. `class:App\\Models\\User`).
+    - Members include their owner (e.g. `method:App\\Models\\User::save`).
+    - Legitimate duplicate declarations receive deterministic `#2`, `#3`, etc. suffixes after files are sorted by path.
+  - Fills: `Name`, `Type`, `File`, `Namespace`, `ClassName`, `Line`, empty `Dependencies` and `Dependents`.
   - Computes a **base complexity score** via `calculateComplexityScore`:
-    - `class`: base 5, +2 if abstract.  
-    - `method` / `function`: base 3, +1 per parameter, +1 if static, +2 if abstract.  
+    - `class`: base 5, +2 if abstract.
+    - `method` / `function`: base 3, +1 per parameter, +1 if static, +2 if abstract.
     - `property`: base 2, +1 if static.
-  - Maintains several indexes:  
-    - `nodeIndex[fullName] = nodeID` (always).  
-    - `nodeIndex[shortName] = nodeID` when unambiguous; removed on conflicts.  
-    - `namespaceMap[classShortName] = fullName` for disambiguation.
+  - Maintains candidate indexes for qualified names, short names, and source contexts. Ambiguous candidates are retained so resolution can reject them instead of selecting an arbitrary node.
 
 - **Relationship building (`buildRelationships`)**
-  - For each `ParsedFile`:  
-    - `processFileUsage` iterates `UsageElement`s, looks up a **source node** by matching `usage.Context` to node name or class name in the same file, and resolves **target nodes** via `findTargetNode`.  
+  - For each `ParsedFile`:
+    - `processFileUsage` iterates `UsageElement`s, looks up a unique **source node** in the same file, and resolves targets via `findTargetNode` using imports, current namespace, qualified names, and usage type. Ambiguous targets do not create edges.
     - `processImports` adds `"imports"`‑type edges from classes to imported items if they exist in `nodeIndex`.
   - `addDependencyRef` updates both `source.Dependencies` and `target.Dependents` with counts and line information, and increments `TotalEdges`. Self‑dependencies are ignored.
 
@@ -288,8 +295,9 @@ To support a new language:
 - Prefer **adding behavior in `pkg/output`** and plumbing in any required data via `AnalysisResult` rather than calling `fmt.Printf` in deeper layers.
 - `ConsoleFormatter.PrintSummary` is the main entry for console output; verbose mode is where detailed reports (like the function usage report) belong.
 - `JSONExporter` currently exports:
-  - The `DependencyGraph`.  
-  - Basic totals and processing time metadata.
+  - The `DependencyGraph` and its diagnostics.
+  - Totals and processing time.
+  - Versioned generator, timestamp, root, language/scanner settings, and SHA-256 source snapshots for freshness checks.
 
 If you need new JSON fields (e.g. to export function usage summaries or additional metrics), update `models.AnalysisResult` and the anonymous struct in `pkg/output/json.go`. Keep additions **backward compatible** when possible.
 
@@ -338,6 +346,8 @@ tukey query --find <term>          analysis.json
 tukey query --callers <name>       analysis.json
 tukey query --dependents <name>    analysis.json
 tukey query --orphans              analysis.json
+tukey query --diagnostics          analysis.json
+tukey query --status               analysis.json
 ```
 
 All flags are mutually exclusive; exactly one must be provided alongside the path to an analysis file.
@@ -350,28 +360,30 @@ All flags are mutually exclusive; exactly one must be provided alongside the pat
 | `--callers <name>` | All nodes that **call or reference** the named symbol (incoming edges). |
 | `--dependents <name>` | All nodes that the named symbol **directly depends on** (outgoing edges). |
 | `--orphans` | All nodes with **no dependencies and no dependents** (dead code candidates). |
+| `--diagnostics` | Parser errors and unresolved or ambiguous references, aggregated by file and symbol. |
+| `--status` | Freshness status and added, modified, or deleted source files. |
 
 For `--find`, `--callers`, and `--dependents`, the query engine is highly resilient and supports matching a symbol in several ways:
 - **Short Name**: Just the unqualified symbol name (e.g., `GatewayFactory` or `pay`).
 - **Namespaced Short Name**: The namespace plus the short name (e.g., `App\Factories\GatewayFactory` or `App\Services\pay`).
 - **Class-Scoped Member Name**: The class name and member (e.g., `PaymentService::pay`).
 - **Fully-Qualified Member Name**: The full namespace, class, and member (e.g., `App\Services\PaymentService::pay`).
-- **Exact Node ID**: The unique stable identifier (e.g., `class:App\Services\PaymentService:5` or `method:App\Services\PaymentService\pay:30`), which resolves in $O(1)$ time.
+- **Exact Node ID**: The unique stable identifier (e.g., `class:App\Services\PaymentService` or `method:App\Services\PaymentService::pay`), which resolves in $O(1)$ time.
 
-For `--callers` and `--dependents`, an exact match is preferred using the same candidate resolution, falling back to partial matches if no exact match is found. When multiple nodes match the term (e.g., a method name shared across multiple classes), results are merged across all matches.
+For `--callers` and `--dependents`, an exact match is preferred, falling back to partial matches. `resolution` records the match type, ambiguity, and every target; `relationships` retains each source-target edge instead of merging away target identity. Localized context uses the same metadata and adds traversal depths.
 
 #### 10.3 Output Schema
 
-Every query returns the same JSON envelope:
+Symbol and diagnostic queries share the following JSON envelope:
 
 ```json
 {
-  "query":   "find | callers | dependents | orphans",
+  "query":   "find | callers | dependents | orphans | diagnostics",
   "term":    "<search term>",
   "count":   42,
   "results": [
     {
-      "id":              "class:App\\Factories\\GatewayFactory:15",
+      "id":              "class:App\\Factories\\GatewayFactory",
       "name":            "GatewayFactory",
       "type":            "class",
       "file":            "/abs/path/to/GatewayFactory.php",
@@ -389,20 +401,28 @@ Every query returns the same JSON envelope:
 }
 ```
 
-- `term` is omitted for `--orphans`.  
-- `namespace` and `className` are omitted when empty.  
-- `refType`, `refLines`, and `refCount` are only present on `--callers` and `--dependents` results; they describe how this node references (or is referenced by) the queried symbol.  
+- `term` is omitted for `--orphans` and `--diagnostics`.
+- `namespace` and `className` are omitted when empty.
+- `refType`, `refLines`, and `refCount` are compatibility summaries; `relationships` preserves every matched source-target pair.
+- `resolution.matchType` is `id`, `exact`, `substring`, or `not_found`; `resolution.targets` is always an array for relationship queries. `targetCount` preserves the total when targets are paginated.
+- MCP queries accept `limit` (50 by default, at most 100 per collection) and an opaque `cursor`; `page.nextCursor` resumes all collections at the next offset. Localized depth is capped at 5.
+- Diagnostic results contain `code`, `severity`, `file`, `message`, `count`, optional symbol/reference metadata, and up to 20 sampled lines.
 - `results` is always a JSON array (never `null`).
+- `--status` instead returns freshness state, snapshot metadata, checked/change counts, and added, modified, or deleted source paths. Legacy exports return `unknown`.
 
 #### 10.4 Implementation
 
-- **`pkg/query/query.go`** – `Engine` struct and query methods (`Find`, `Callers`, `Dependents`, `Orphans`).
-- **`pkg/query/query_test.go`** – unit tests using a synthetic graph.
+- **`pkg/query/query.go`** – `Engine`, symbol lookup, diagnostics, and analysis-file loading.
+- **`pkg/query/relationships.go`** – caller/dependency relationships and localized traversal with resolution metadata.
+- **`pkg/query/pagination.go`** – shared limits, opaque cursors, and page metadata for MCP-facing query variants.
+- **`pkg/query/status.go`** – source freshness comparison using the recorded snapshot and scanner settings.
+- **`pkg/query/*_test.go`** – synthetic graph, relationship, pagination, and filesystem-backed freshness tests.
 - **`cmd/tukey/query_cmd.go`** – CLI argument parsing (`parseQueryArgs`) and output encoding.
 - **`cmd/tukey/main.go`** – dispatches to `runQuery(os.Args[2:])` before the analysis path when `os.Args[1] == "query"`.
 
 Agents working on the query subcommand should follow the same conventions:
-- Keep `pkg/query` free of CLI concerns; all user‑facing formatting belongs in `cmd/tukey/query_cmd.go`.
-- The `Engine` depends only on `*models.DependencyGraph` so it can be unit‑tested without a file system.
+- Keep `pkg/query` free of CLI concerns; all user-facing formatting belongs in `cmd/tukey/query_cmd.go`.
+- Graph queries depend only on `*models.DependencyGraph`; freshness checks additionally use metadata and the current source tree.
+- Existing query methods remain unbounded for compatibility; MCP handlers use the `WithOptions` variants with bounded pages.
 - Never change the output schema in a backwards‑incompatible way; downstream agents parse this JSON.
 

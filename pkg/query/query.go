@@ -13,7 +13,7 @@ import (
 	"github.com/boone-studios/tukey/internal/models"
 )
 
-// NodeResult is a single entry returned by all query types
+// NodeResult is a single entry returned by symbol query types.
 type NodeResult struct {
 	ID              string `json:"id"`
 	Name            string `json:"name"`
@@ -25,26 +25,40 @@ type NodeResult struct {
 	Score           int    `json:"score"`
 	DependencyCount int    `json:"dependencyCount"`
 	DependentCount  int    `json:"dependentCount"`
+	Depth           int    `json:"depth,omitempty"`
 	// Populated for --callers and --dependents to show how nodes are connected
 	RefType  string `json:"refType,omitempty"`
 	RefLines []int  `json:"refLines,omitempty"`
 	RefCount int    `json:"refCount,omitempty"`
 }
 
-// QueryResult is the JSON envelope returned by every query operation
+// QueryResult is the JSON envelope returned by symbol query operations.
 type QueryResult struct {
-	Query   string       `json:"query"`
-	Term    string       `json:"term,omitempty"`
-	Count   int          `json:"count"`
-	Results []NodeResult `json:"results"`
+	Query         string            `json:"query"`
+	Term          string            `json:"term,omitempty"`
+	Count         int               `json:"count"`
+	Results       []NodeResult      `json:"results"`
+	Resolution    *SymbolResolution `json:"resolution,omitempty"`
+	Relationships []EdgeResult      `json:"relationships,omitempty"`
+	Page          *PageInfo         `json:"page,omitempty"`
+}
+
+// DiagnosticsResult is the JSON envelope returned for analysis diagnostics.
+type DiagnosticsResult struct {
+	Query   string                      `json:"query"`
+	Count   int                         `json:"count"`
+	Results []models.AnalysisDiagnostic `json:"results"`
+	Page    *PageInfo                   `json:"page,omitempty"`
 }
 
 // Engine queries a pre-built Tukey analysis file without re-running analysis
 type Engine struct {
-	graph *models.DependencyGraph
+	graph    *models.DependencyGraph
+	metadata models.AnalysisMetadata
 }
 
 type analysisEnvelope struct {
+	models.AnalysisMetadata
 	Graph *models.DependencyGraph `json:"graph"`
 }
 
@@ -62,7 +76,7 @@ func Load(path string) (*Engine, error) {
 	if env.Graph == nil {
 		return nil, fmt.Errorf("%s: missing 'graph' field – was this file produced by tukey -o?", path)
 	}
-	return &Engine{graph: env.Graph}, nil
+	return &Engine{graph: env.Graph, metadata: env.AnalysisMetadata}, nil
 }
 
 // Graph returns the underlying dependency graph
@@ -70,94 +84,107 @@ func (e *Engine) Graph() *models.DependencyGraph {
 	return e.graph
 }
 
-// Find returns all nodes whose name contains term (case-insensitive substring)
+// Find returns all nodes whose name contains term (case-insensitive substring).
 func (e *Engine) Find(term string) QueryResult {
-	// Try direct ID lookup first
+	result, _ := e.FindWithOptions(term, PageOptions{Unbounded: true})
+	result.Page = nil
+	return result
+}
+
+// FindWithOptions returns a page of matching nodes.
+func (e *Engine) FindWithOptions(term string, options PageOptions) (QueryResult, error) {
+	offset, limit, err := resolvePage(options)
+	if err != nil {
+		return QueryResult{}, err
+	}
+	var results []NodeResult
 	if node, exists := e.graph.Nodes[term]; exists {
-		results := []NodeResult{nodeToResult(node)}
-		return QueryResult{Query: "find", Term: term, Count: 1, Results: results}
-	}
-
-	lower := strings.ToLower(term)
-	var results []NodeResult
-	for _, node := range e.graph.Nodes {
-		matched := false
-		for _, candidateName := range e.getNodeNames(node) {
-			if strings.Contains(strings.ToLower(candidateName), lower) {
-				matched = true
-				break
+		results = []NodeResult{nodeToResult(node)}
+	} else {
+		lower := strings.ToLower(term)
+		for _, node := range e.graph.Nodes {
+			matched := false
+			for _, candidateName := range e.getNodeNames(node) {
+				if strings.Contains(strings.ToLower(candidateName), lower) {
+					matched = true
+					break
+				}
 			}
-		}
-		if matched {
-			results = append(results, nodeToResult(node))
+			if matched {
+				results = append(results, nodeToResult(node))
+			}
 		}
 	}
 	sortResults(results)
-	return QueryResult{Query: "find", Term: term, Count: len(results), Results: coalesce(results)}
+	total := len(results)
+	results, hasMore := pageSlice(results, offset, limit)
+	return QueryResult{
+		Query: "find", Term: term, Count: len(results), Results: coalesce(results),
+		Page: makePage(limit, offset, len(results), total, hasMore),
+	}, nil
 }
 
-// Callers returns all nodes that call or reference the named symbol (incoming edges)
-// When multiple nodes share the same name, results are merged across all matches
-func (e *Engine) Callers(term string) QueryResult {
-	targets := e.findNodes(term)
-	seen := make(map[string]bool)
-	var results []NodeResult
-	for _, target := range targets {
-		for _, ref := range target.Dependents {
-			if seen[ref.TargetID] {
-				continue
-			}
-			seen[ref.TargetID] = true
-			caller := e.graph.Nodes[ref.TargetID]
-			if caller == nil {
-				continue
-			}
-			r := nodeToResult(caller)
-			r.RefType = ref.Type
-			r.RefLines = ref.Lines
-			r.RefCount = ref.Count
-			results = append(results, r)
-		}
-	}
-	sortResults(results)
-	return QueryResult{Query: "callers", Term: term, Count: len(results), Results: coalesce(results)}
-}
-
-// Dependents returns all nodes that the named symbol directly depends on (outgoing edges)
-// When multiple nodes share the same name, results are merged across all matches
-func (e *Engine) Dependents(term string) QueryResult {
-	targets := e.findNodes(term)
-	seen := make(map[string]bool)
-	var results []NodeResult
-	for _, target := range targets {
-		for _, ref := range target.Dependencies {
-			if seen[ref.TargetID] {
-				continue
-			}
-			seen[ref.TargetID] = true
-			dep := e.graph.Nodes[ref.TargetID]
-			if dep == nil {
-				continue
-			}
-			r := nodeToResult(dep)
-			r.RefType = ref.Type
-			r.RefLines = ref.Lines
-			r.RefCount = ref.Count
-			results = append(results, r)
-		}
-	}
-	sortResults(results)
-	return QueryResult{Query: "dependents", Term: term, Count: len(results), Results: coalesce(results)}
-}
-
-// Orphans returns all nodes with no dependencies and no dependents (dead code candidates)
+// Orphans returns all nodes with no dependencies and no dependents (dead code candidates).
 func (e *Engine) Orphans() QueryResult {
+	result, _ := e.OrphansWithOptions(PageOptions{Unbounded: true})
+	result.Page = nil
+	return result
+}
+
+// OrphansWithOptions returns a page of dead-code candidates.
+func (e *Engine) OrphansWithOptions(options PageOptions) (QueryResult, error) {
+	offset, limit, err := resolvePage(options)
+	if err != nil {
+		return QueryResult{}, err
+	}
 	var results []NodeResult
 	for _, node := range e.graph.Orphans {
 		results = append(results, nodeToResult(node))
 	}
 	sortResults(results)
-	return QueryResult{Query: "orphans", Count: len(results), Results: coalesce(results)}
+	total := len(results)
+	results, hasMore := pageSlice(results, offset, limit)
+	return QueryResult{
+		Query: "orphans", Count: len(results), Results: coalesce(results),
+		Page: makePage(limit, offset, len(results), total, hasMore),
+	}, nil
+}
+
+// Diagnostics returns parser and resolution diagnostics for the loaded analysis.
+func (e *Engine) Diagnostics() DiagnosticsResult {
+	result, _ := e.DiagnosticsWithOptions(PageOptions{Unbounded: true})
+	result.Page = nil
+	return result
+}
+
+// DiagnosticsWithOptions returns a page of parser and resolution diagnostics.
+func (e *Engine) DiagnosticsWithOptions(options PageOptions) (DiagnosticsResult, error) {
+	offset, limit, err := resolvePage(options)
+	if err != nil {
+		return DiagnosticsResult{}, err
+	}
+	results := append([]models.AnalysisDiagnostic(nil), e.graph.Diagnostics...)
+	sort.Slice(results, func(i, j int) bool {
+		if results[i].File != results[j].File {
+			return results[i].File < results[j].File
+		}
+		if results[i].Code != results[j].Code {
+			return results[i].Code < results[j].Code
+		}
+		if results[i].Symbol != results[j].Symbol {
+			return results[i].Symbol < results[j].Symbol
+		}
+		return results[i].ReferenceType < results[j].ReferenceType
+	})
+	if results == nil {
+		results = []models.AnalysisDiagnostic{}
+	}
+	total := len(results)
+	results, hasMore := pageSlice(results, offset, limit)
+	return DiagnosticsResult{
+		Query: "diagnostics", Count: len(results), Results: results,
+		Page: makePage(limit, offset, len(results), total, hasMore),
+	}, nil
 }
 
 // getNodeNames returns all possible candidate names for a node to match against
@@ -182,20 +209,22 @@ func (e *Engine) getNodeNames(node *models.DependencyNode) []string {
 }
 
 // findNodes returns all nodes whose name exactly matches term (case-insensitive),
-// falling back to a substring match when there are no exact matches
+// falling back to a substring match when there are no exact matches.
 func (e *Engine) findNodes(term string) []*models.DependencyNode {
-	// Try direct ID lookup first (exact match)
+	nodes, _ := e.findNodesWithResolution(term)
+	return nodes
+}
+
+func (e *Engine) findNodesWithResolution(term string) ([]*models.DependencyNode, string) {
 	if node, exists := e.graph.Nodes[term]; exists {
-		return []*models.DependencyNode{node}
+		return []*models.DependencyNode{node}, "id"
 	}
 
 	lower := strings.ToLower(term)
 	var exact, partial []*models.DependencyNode
-
 	for _, node := range e.graph.Nodes {
 		isExact := false
 		isPartial := false
-
 		for _, candidateName := range e.getNodeNames(node) {
 			candLower := strings.ToLower(candidateName)
 			if candLower == lower {
@@ -205,7 +234,6 @@ func (e *Engine) findNodes(term string) []*models.DependencyNode {
 				isPartial = true
 			}
 		}
-
 		if isExact {
 			exact = append(exact, node)
 		} else if isPartial {
@@ -214,9 +242,20 @@ func (e *Engine) findNodes(term string) []*models.DependencyNode {
 	}
 
 	if len(exact) > 0 {
-		return exact
+		sortNodes(exact)
+		return exact, "exact"
 	}
-	return partial
+	if len(partial) == 0 {
+		return []*models.DependencyNode{}, "not_found"
+	}
+	sortNodes(partial)
+	return partial, "substring"
+}
+
+func sortNodes(nodes []*models.DependencyNode) {
+	sort.Slice(nodes, func(i, j int) bool {
+		return nodes[i].ID < nodes[j].ID
+	})
 }
 
 func nodeToResult(node *models.DependencyNode) NodeResult {
@@ -239,7 +278,10 @@ func sortResults(results []NodeResult) {
 		if results[i].File != results[j].File {
 			return results[i].File < results[j].File
 		}
-		return results[i].Line < results[j].Line
+		if results[i].Line != results[j].Line {
+			return results[i].Line < results[j].Line
+		}
+		return results[i].ID < results[j].ID
 	})
 }
 
@@ -249,119 +291,4 @@ func coalesce(results []NodeResult) []NodeResult {
 		return []NodeResult{}
 	}
 	return results
-}
-
-// LocalizedContextResult holds the categorized target, dependency, and dependent nodes for a symbol
-type LocalizedContextResult struct {
-	Symbol       string       `json:"symbol"`
-	TargetNodes  []NodeResult `json:"targets"`
-	Dependencies []NodeResult `json:"dependencies"`
-	Dependents   []NodeResult `json:"dependents"`
-}
-
-// LocalizedContext finds dependencies and dependents up to a certain depth around a symbol
-func (e *Engine) LocalizedContext(term string, maxDepth int) LocalizedContextResult {
-	if maxDepth < 1 {
-		maxDepth = 1
-	}
-
-	targets := e.findNodes(term)
-	res := LocalizedContextResult{
-		Symbol:       term,
-		TargetNodes:  []NodeResult{},
-		Dependencies: []NodeResult{},
-		Dependents:   []NodeResult{},
-	}
-
-	if len(targets) == 0 {
-		return res
-	}
-
-	// Keep track of target IDs
-	targetIDs := make(map[string]bool)
-	for _, target := range targets {
-		targetIDs[target.ID] = true
-		res.TargetNodes = append(res.TargetNodes, nodeToResult(target))
-	}
-
-	// BFS for Dependencies (outgoing edges)
-	seenDeps := make(map[string]bool)
-	type queueItem struct {
-		node  *models.DependencyNode
-		depth int
-	}
-
-	var depQueue []queueItem
-	for _, target := range targets {
-		depQueue = append(depQueue, queueItem{node: target, depth: 0})
-	}
-
-	for len(depQueue) > 0 {
-		current := depQueue[0]
-		depQueue = depQueue[1:]
-
-		if current.depth >= maxDepth {
-			continue
-		}
-
-		for _, ref := range current.node.Dependencies {
-			if targetIDs[ref.TargetID] || seenDeps[ref.TargetID] {
-				continue
-			}
-			seenDeps[ref.TargetID] = true
-			depNode := e.graph.Nodes[ref.TargetID]
-			if depNode == nil {
-				continue
-			}
-
-			r := nodeToResult(depNode)
-			r.RefType = ref.Type
-			r.RefLines = ref.Lines
-			r.RefCount = ref.Count
-			res.Dependencies = append(res.Dependencies, r)
-
-			depQueue = append(depQueue, queueItem{node: depNode, depth: current.depth + 1})
-		}
-	}
-
-	// BFS for Dependents (incoming edges)
-	seenCaller := make(map[string]bool)
-	var callerQueue []queueItem
-	for _, target := range targets {
-		callerQueue = append(callerQueue, queueItem{node: target, depth: 0})
-	}
-
-	for len(callerQueue) > 0 {
-		current := callerQueue[0]
-		callerQueue = callerQueue[1:]
-
-		if current.depth >= maxDepth {
-			continue
-		}
-
-		for _, ref := range current.node.Dependents {
-			if targetIDs[ref.TargetID] || seenCaller[ref.TargetID] {
-				continue
-			}
-			seenCaller[ref.TargetID] = true
-			callerNode := e.graph.Nodes[ref.TargetID]
-			if callerNode == nil {
-				continue
-			}
-
-			r := nodeToResult(callerNode)
-			r.RefType = ref.Type
-			r.RefLines = ref.Lines
-			r.RefCount = ref.Count
-			res.Dependents = append(res.Dependents, r)
-
-			callerQueue = append(callerQueue, queueItem{node: callerNode, depth: current.depth + 1})
-		}
-	}
-
-	sortResults(res.TargetNodes)
-	sortResults(res.Dependencies)
-	sortResults(res.Dependents)
-
-	return res
 }

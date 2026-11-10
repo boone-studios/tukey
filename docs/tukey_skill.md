@@ -74,28 +74,32 @@ tukey query [FLAG] <term> tukey-results.json
 | `--callers <term>` | All nodes that call or reference the symbol (incoming edges). | Short names, class-scoped members, FQDNs, or exact IDs. |
 | `--dependents <term>` | All nodes that the named symbol directly depends on (outgoing edges). | Short names, class-scoped members, FQDNs, or exact IDs. |
 | `--orphans` | All dead-code candidates (zero dependencies and zero dependents). | None (lists all matching elements in the graph). |
+| `--diagnostics` | Parser errors and unresolved or ambiguous references, aggregated by file and symbol. | None. |
+| `--status` | Freshness status and added, modified, or deleted source files. | None. |
 
 #### Target Symbol Formats Supported:
 Tukey's query engine is highly resilient and supports matching a symbol in several ways:
-1. **Exact Node ID**: `class:App\Services\PaymentService:5` or `method:App\Services\PaymentService\pay:30` (Fastest $O(1)$ resolution).
+1. **Exact Node ID**: `class:App\Services\PaymentService` or `method:App\Services\PaymentService::pay` (Fastest $O(1)$ resolution).
 2. **Fully-Qualified Member**: `App\Services\PaymentService::pay`
 3. **Class-Scoped Member**: `PaymentService::pay`
 4. **Namespaced Short Name**: `App\Services\PaymentService`
 5. **Short Name**: `PaymentService` or `pay`
 
+Caller, dependency, and localized-context responses include a `resolution` object with `matchType` (`id`, `exact`, `substring`, or `not_found`), `ambiguous`, and all matched `targets`. Their `relationships` array preserves each `sourceId`, `targetId`, reference `type`, `lines`, `count`, and traversal `depth`. When `ambiguous` is true, repeat the query with a qualified name or exact ID instead of treating the merged summary as one symbol.
+
 ---
 
 ## 📋 JSON Query Output Schema
 
-Every `tukey query` returns a predictable JSON structure:
+Every `tukey query` returns a predictable JSON envelope. Symbol queries contain node results:
 ```json
 {
-  "query": "find | callers | dependents | orphans",
+  "query": "find | callers | dependents | orphans | diagnostics | status",
   "term": "<search term>",
   "count": 1,
   "results": [
     {
-      "id": "class:App\\Services\\PaymentService:5",
+      "id": "class:App\\Services\\PaymentService",
       "name": "PaymentService",
       "type": "class",
       "file": "app/Services/PaymentService.php",
@@ -113,8 +117,13 @@ Every `tukey query` returns a predictable JSON structure:
 }
 ```
 
-* `results` is always a JSON array (never `null` or empty on misses; it will be `[]`).
-* `refType`, `refLines`, and `refCount` are populated for `--callers` and `--dependents` queries to show exactly *how* and *where* (line numbers) the connection occurs.
+* `term` is present only for `find`, `callers`, and `dependents`; `orphans`, `diagnostics`, and `status` omit it.
+* `results` is always a JSON array (never `null` or empty on misses; it will be `[]`). For caller/dependency queries it is a unique-node summary.
+* `refType`, `refLines`, and `refCount` remain for compatibility, but may summarize only the first target relationship for a node. Use `relationships` when target identity matters.
+
+`--diagnostics` results instead contain `code`, `severity`, `file`, `message`, `count`, optional `symbol` and `referenceType`, and up to 20 sampled `lines`. The envelope's `count` is the number of diagnostic groups; each result's `count` is the number of occurrences in that group. Codes are `parse_error`, `unresolved_source`, `unresolved_reference`, and `ambiguous_reference`.
+
+`--status` returns `status` (`fresh`, `stale`, or `unknown`), snapshot metadata, `checkedFiles`, `changeCount`, and a `changes` array whose entries contain `path` and `change` (`added`, `modified`, or `deleted`). Older exports without source metadata return `unknown`.
 
 ---
 
@@ -176,11 +185,13 @@ For AI agent environments, Tukey supports the Model Context Protocol (MCP) serve
 tukey mcp tukey-results.json
 ```
 
-In addition to symbol search and caller tracing, the MCP server provides the **`tukey_get_localized_context`** tool. This tool performs concurrent BFS traversals up to a specified depth to gather the structural neighborhood around a target symbol. This is ideal for pruning codebase context down to only the relevant interfaces and dependents before editing.
+In addition to symbol search and caller tracing, the MCP server provides **`tukey_get_analysis_status`** for source freshness checks, **`tukey_get_analysis_diagnostics`** for parser and resolution warnings, and **`tukey_get_localized_context`** for dependency neighborhoods. Localized context uses breadth-first traversal up to a specified depth to gather the structural neighborhood around a target symbol, helping agents focus on relevant interfaces and dependents before editing.
 
 #### Tool Parameters:
-* `symbol` (string, required): The target symbol name, namespace, or exact node ID.
-* `depth` (integer, optional): The traversal depth boundary (defaults to `1`).
+* `symbol` (string, required for symbol tools): The target symbol name, namespace, or exact node ID.
+* `depth` (integer, localized context only): Traversal depth (default `1`, maximum `5`).
+* `limit` (integer, optional): Maximum items per collection (default `50`, maximum `100`).
+* `cursor` (string, optional): Opaque continuation cursor from `page.nextCursor`.
 
 #### JSON Output Format:
 ```json
@@ -188,7 +199,7 @@ In addition to symbol search and caller tracing, the MCP server provides the **`
   "symbol": "PaymentService",
   "targets": [
     {
-      "id": "class:App\\Services\\PaymentService:10",
+      "id": "class:App\\Services\\PaymentService",
       "name": "PaymentService",
       "type": "class",
       "file": "app/Services/PaymentService.php",
@@ -200,7 +211,7 @@ In addition to symbol search and caller tracing, the MCP server provides the **`
   ],
   "dependencies": [
     {
-      "id": "class:App\\Gateways\\StripeGateway:5",
+      "id": "class:App\\Gateways\\StripeGateway",
       "name": "StripeGateway",
       "type": "class",
       "file": "app/Gateways/StripeGateway.php",
@@ -215,7 +226,7 @@ In addition to symbol search and caller tracing, the MCP server provides the **`
   ],
   "dependents": [
     {
-      "id": "class:App\\Http\\Controllers\\CheckoutController:15",
+      "id": "class:App\\Http\\Controllers\\CheckoutController",
       "name": "CheckoutController",
       "type": "class",
       "file": "app/Http/Controllers/CheckoutController.php",
@@ -231,19 +242,23 @@ In addition to symbol search and caller tracing, the MCP server provides the **`
 }
 ```
 
+Paginated MCP responses include `page.limit`, `page.returned`, `page.total`, and optional `page.nextCursor`. Limits apply independently to each returned collection. To continue, repeat the same query and arguments with `cursor` set to `nextCursor`; stop when it is omitted.
+
 ---
 
 ## 🤖 Agent Best Practices & Token-Saving Tips
 
-* **Step 1: Check for existing graphs**: 
-  When you land in a project, check if `tukey-results.json` already exists. If it does, do NOT re-run the full analysis. Go straight to Step 3.
-* **Step 2: Run a fast analysis**: 
-  If no graph exists, run `tukey -l php,js -o tukey-results.json .` in the background. It takes less than a second even on large codebases.
-* **Step 3: Prune your context via MCP Localized Context**:
+* **Step 1: Check graph freshness**:
+  When a graph exists, run `tukey query --status` or call `tukey_get_analysis_status`. Continue only when it is `fresh`; `unknown` means the export lacks source metadata.
+* **Step 2: Run a fast analysis when needed**:
+  If no graph exists or it is stale, run `tukey -l php,js -o tukey-results.json .` in the background.
+* **Step 3: Check analysis completeness**:
+  Run `tukey query --diagnostics` or call `tukey_get_analysis_diagnostics`. Treat empty graph results cautiously when parser errors or unresolved references are present.
+* **Step 4: Prune your context via MCP Localized Context**:
   If using Tukey's MCP server, invoke `tukey_get_localized_context` for a symbol you plan to edit. This avoids reading unrelated code, returning immediate dependency and dependent boundaries in one step.
-* **Step 4: Trace callers before editing**: 
-  Before modifying a method or function, run `tukey query --callers "ClassName::methodName"`. This ensures you know every single call site in the project that will be affected by your changes, preventing breaking changes.
-* **Step 5: Self-Audit structural changes before staging**:
+* **Step 5: Trace callers before editing**:
+  Before modifying a method or function, run `tukey query --callers "ClassName::methodName"`. Review the returned call sites alongside diagnostics; static analysis may not resolve dynamic dispatch.
+* **Step 6: Self-Audit structural changes before staging**:
   After completing edits, generate a temporary graph and run `tukey --compare baseline.json` to verify you haven't introduced circular dependencies, complexity regressions, or orphaned dead code.
-* **Step 6: Clean up dead code**: 
-  Run `tukey query --orphans` to instantly discover all unused functions, classes, and constants in the project without manually tracing them.
+* **Step 7: Review dead-code candidates**:
+  Run `tukey query --orphans` to discover isolated elements. Verify entry points, dynamic calls, and framework hooks before deleting anything.

@@ -7,11 +7,68 @@ package models
 
 import "sync"
 
+// StableSymbolID returns a line-independent identifier for a code element.
+func StableSymbolID(elementType, namespace, className, name string) string {
+	qualifiedName := name
+	if className != "" {
+		qualifiedName = className + "::" + name
+	}
+	if namespace != "" {
+		qualifiedName = namespace + "\\" + qualifiedName
+	}
+	return elementType + ":" + qualifiedName
+}
+
 // FileInfo holds information about discovered PHP files
 type FileInfo struct {
 	Path         string
 	RelativePath string
 	Size         int64
+}
+
+const AnalysisSchemaVersion = 1
+
+type GeneratorMetadata struct {
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+type SourceFileMetadata struct {
+	Path   string `json:"path"`
+	Size   int64  `json:"size"`
+	SHA256 string `json:"sha256"`
+}
+
+type AnalysisMetadata struct {
+	SchemaVersion  int                  `json:"schemaVersion"`
+	Generator      GeneratorMetadata    `json:"generator"`
+	GeneratedAt    string               `json:"generatedAt"`
+	RootPath       string               `json:"rootPath"`
+	Languages      []string             `json:"languages"`
+	ExcludeDirs    []string             `json:"excludeDirs"`
+	FileExtensions []string             `json:"fileExtensions"`
+	SourceFiles    []SourceFileMetadata `json:"sourceFiles"`
+}
+
+const (
+	DiagnosticParseError          = "parse_error"
+	DiagnosticUnresolvedSource    = "unresolved_source"
+	DiagnosticUnresolvedReference = "unresolved_reference"
+	DiagnosticAmbiguousReference  = "ambiguous_reference"
+	DiagnosticSeverityError       = "error"
+	DiagnosticSeverityWarning     = "warning"
+)
+
+// AnalysisDiagnostic describes incomplete or uncertain analysis without discarding the graph.
+type AnalysisDiagnostic struct {
+	Code          string `json:"code"`
+	Severity      string `json:"severity"`
+	File          string `json:"file"`
+	Symbol        string `json:"symbol,omitempty"`
+	ReferenceType string `json:"referenceType,omitempty"`
+	Message       string `json:"message"`
+	Count         int    `json:"count"`
+	Lines         []int  `json:"lines,omitempty"`
 }
 
 // CodeElement represents any parseable element in PHP code
@@ -31,11 +88,13 @@ type CodeElement struct {
 
 // ParsedFile contains all elements found in a PHP file
 type ParsedFile struct {
-	Path      string
-	Namespace string
-	Uses      []string       // Import statements
-	Elements  []CodeElement  // All defined elements
-	Usage     []UsageElement // References to other elements
+	Path          string
+	Namespace     string
+	Uses          []string             // Import statements
+	ImportAliases map[string]string    // Local import names to fully-qualified paths
+	Elements      []CodeElement        // All defined elements
+	Usage         []UsageElement       // References to other elements
+	Diagnostics   []AnalysisDiagnostic // Per-file parsing diagnostics
 }
 
 // UsageElement represents usage of external code elements
@@ -79,6 +138,7 @@ type DependencyGraph struct {
 	Orphans        []*DependencyNode          `json:"orphans"`
 	HighlyDepended []*DependencyNode          `json:"highlyDepended"`
 	ComplexNodes   []*DependencyNode          `json:"complexNodes"`
+	Diagnostics    []AnalysisDiagnostic       `json:"diagnostics"`
 	mu             sync.RWMutex
 }
 
@@ -90,6 +150,7 @@ type AnalysisResult struct {
 	TotalElements  int
 	ProcessingTime string
 	Cycles         [][]string
+	Metadata       AnalysisMetadata
 }
 
 // Lock Concurrency helpers (exported so other packages can coordinate safely)

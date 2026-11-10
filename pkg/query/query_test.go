@@ -232,7 +232,13 @@ func TestLoad_RoundTrip(t *testing.T) {
 	e := buildTestEngine()
 
 	// Marshal the engine's graph into an analysis envelope and write to a temp file
-	env := analysisEnvelope{Graph: e.graph}
+	env := analysisEnvelope{
+		Graph: e.graph,
+		AnalysisMetadata: models.AnalysisMetadata{
+			SchemaVersion: models.AnalysisSchemaVersion,
+			GeneratedAt:   "2026-01-01T00:00:00Z",
+		},
+	}
 	data, err := json.MarshalIndent(env, "", "  ")
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
@@ -251,6 +257,9 @@ func TestLoad_RoundTrip(t *testing.T) {
 	r := loaded.Find("GatewayFactory")
 	if r.Count != 1 {
 		t.Errorf("round-trip find: got %d results, want 1", r.Count)
+	}
+	if loaded.metadata.SchemaVersion != models.AnalysisSchemaVersion || loaded.metadata.GeneratedAt == "" {
+		t.Fatalf("metadata did not survive round trip: %+v", loaded.metadata)
 	}
 }
 
@@ -395,6 +404,24 @@ func TestLocalizedContext(t *testing.T) {
 			t.Errorf("expected 1 dependent PaymentService, got %v", res.Dependents)
 		}
 	})
+}
+
+func TestDiagnostics(t *testing.T) {
+	e := &Engine{graph: &models.DependencyGraph{Diagnostics: []models.AnalysisDiagnostic{
+		{Code: models.DiagnosticParseError, Severity: models.DiagnosticSeverityError, File: "broken.php", Message: "invalid syntax", Count: 1},
+	}}}
+	result := e.Diagnostics()
+	if result.Query != "diagnostics" || result.Count != 1 || len(result.Results) != 1 {
+		t.Fatalf("unexpected diagnostics result: %+v", result)
+	}
+	if result.Results[0].Code != models.DiagnosticParseError {
+		t.Fatalf("unexpected diagnostic: %+v", result.Results[0])
+	}
+
+	empty := (&Engine{graph: &models.DependencyGraph{}}).Diagnostics()
+	if empty.Results == nil || empty.Count != 0 {
+		t.Fatalf("empty diagnostics should return [], got %+v", empty)
+	}
 }
 
 func contains(s, substr string) bool {

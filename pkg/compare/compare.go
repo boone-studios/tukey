@@ -39,21 +39,7 @@ type ComparisonReport struct {
 
 // GetStableSignature constructs a line-number independent, unique signature for a node
 func GetStableSignature(node *models.DependencyNode) string {
-	if node.ClassName != "" {
-		fqcn := node.Namespace
-		if fqcn != "" {
-			fqcn += "\\"
-		}
-		fqcn += node.ClassName
-		return fmt.Sprintf("%s:%s::%s", node.Type, fqcn, node.Name)
-	}
-
-	fqn := node.Namespace
-	if fqn != "" {
-		fqn += "\\"
-	}
-	fqn += node.Name
-	return fmt.Sprintf("%s:%s", node.Type, fqn)
+	return models.StableSymbolID(node.Type, node.Namespace, node.ClassName, node.Name)
 }
 
 // CompareGraphs parses the baseline and active graphs to produce a delta comparison

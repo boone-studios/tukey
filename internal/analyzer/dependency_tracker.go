@@ -13,10 +13,12 @@ import (
 
 // DependencyTracker builds dependency relationships
 type DependencyTracker struct {
-	graph        *models.DependencyGraph
-	nodeIndex    map[string]string     // Maps element names to node IDs
-	namespaceMap map[string]string     // Maps class names to full-namespaced names
-	allUsage     []models.UsageElement // Store all usage for function reporting
+	graph           *models.DependencyGraph
+	nodeIndex       map[string][]string
+	shortNameIndex  map[string][]string
+	sourceIndex     map[string]map[string][]string
+	diagnosticIndex map[string]int
+	allUsage        []models.UsageElement // Store all usage for function reporting
 }
 
 // NewDependencyTracker creates a new dependency tracker
@@ -27,15 +29,23 @@ func NewDependencyTracker() *DependencyTracker {
 			Orphans:        []*models.DependencyNode{},
 			HighlyDepended: []*models.DependencyNode{},
 			ComplexNodes:   []*models.DependencyNode{},
+			Diagnostics:    []models.AnalysisDiagnostic{},
 		},
-		nodeIndex:    make(map[string]string),
-		namespaceMap: make(map[string]string),
-		allUsage:     []models.UsageElement{},
+		nodeIndex:       make(map[string][]string),
+		shortNameIndex:  make(map[string][]string),
+		sourceIndex:     make(map[string]map[string][]string),
+		diagnosticIndex: make(map[string]int),
+		allUsage:        []models.UsageElement{},
 	}
 }
 
 // BuildDependencyGraph creates the complete dependency graph from parsed files
 func (dt *DependencyTracker) BuildDependencyGraph(parsedFiles []*models.ParsedFile) *models.DependencyGraph {
+	parsedFiles = append([]*models.ParsedFile(nil), parsedFiles...)
+	sort.Slice(parsedFiles, func(i, j int) bool {
+		return parsedFiles[i].Path < parsedFiles[j].Path
+	})
+
 	// Phase 1: Create all nodes and build indexes
 	dt.createNodes(parsedFiles)
 
@@ -45,8 +55,61 @@ func (dt *DependencyTracker) BuildDependencyGraph(parsedFiles []*models.ParsedFi
 	// Phase 3: Calculate metrics and analyze patterns
 	dt.calculateMetrics()
 	dt.identifyPatterns()
+	dt.sortDiagnostics()
 
 	return dt.graph
+}
+
+func (dt *DependencyTracker) collectFileDiagnostics(file *models.ParsedFile) {
+	for _, diagnostic := range file.Diagnostics {
+		if diagnostic.Count == 0 {
+			diagnostic.Count = 1
+		}
+		dt.graph.Diagnostics = append(dt.graph.Diagnostics, diagnostic)
+	}
+}
+
+func (dt *DependencyTracker) recordResolutionDiagnostic(code string, file *models.ParsedFile, usage models.UsageElement, symbol, message string) {
+	key := strings.Join([]string{code, file.Path, symbol, usage.Type}, "\x00")
+	if index, ok := dt.diagnosticIndex[key]; ok {
+		diagnostic := &dt.graph.Diagnostics[index]
+		diagnostic.Count++
+		if usage.Line > 0 && len(diagnostic.Lines) < 20 {
+			diagnostic.Lines = append(diagnostic.Lines, usage.Line)
+		}
+		return
+	}
+
+	diagnostic := models.AnalysisDiagnostic{
+		Code:          code,
+		Severity:      models.DiagnosticSeverityWarning,
+		File:          file.Path,
+		Symbol:        symbol,
+		ReferenceType: usage.Type,
+		Message:       message,
+		Count:         1,
+	}
+	if usage.Line > 0 {
+		diagnostic.Lines = []int{usage.Line}
+	}
+	dt.diagnosticIndex[key] = len(dt.graph.Diagnostics)
+	dt.graph.Diagnostics = append(dt.graph.Diagnostics, diagnostic)
+}
+
+func (dt *DependencyTracker) sortDiagnostics() {
+	sort.Slice(dt.graph.Diagnostics, func(i, j int) bool {
+		a, b := dt.graph.Diagnostics[i], dt.graph.Diagnostics[j]
+		if a.File != b.File {
+			return a.File < b.File
+		}
+		if a.Code != b.Code {
+			return a.Code < b.Code
+		}
+		if a.Symbol != b.Symbol {
+			return a.Symbol < b.Symbol
+		}
+		return a.ReferenceType < b.ReferenceType
+	})
 }
 
 // createNodes builds all nodes and indexes from parsed files
@@ -55,12 +118,17 @@ func (dt *DependencyTracker) createNodes(parsedFiles []*models.ParsedFile) {
 	defer dt.graph.Unlock()
 
 	for _, file := range parsedFiles {
-		// Build namespace mapping for this file
-		for _, element := range file.Elements {
-			fullName := dt.getFullName(element.Namespace, element.Name)
+		dt.collectFileDiagnostics(file)
+		if dt.sourceIndex[file.Path] == nil {
+			dt.sourceIndex[file.Path] = make(map[string][]string)
+		}
 
-			// Create unique node ID
-			nodeID := fmt.Sprintf("%s:%s:%d", element.Type, fullName, element.Line)
+		for _, element := range file.Elements {
+			baseID := models.StableSymbolID(element.Type, element.Namespace, element.ClassName, element.Name)
+			nodeID := baseID
+			for suffix := 2; dt.graph.Nodes[nodeID] != nil; suffix++ {
+				nodeID = fmt.Sprintf("%s#%d", baseID, suffix)
+			}
 
 			node := &models.DependencyNode{
 				ID:           nodeID,
@@ -76,39 +144,35 @@ func (dt *DependencyTracker) createNodes(parsedFiles []*models.ParsedFile) {
 			}
 
 			dt.graph.Nodes[nodeID] = node
-
-			// Build search indexes - be more careful about conflicts
-			// Always index by full name (with namespace)
-			dt.nodeIndex[fullName] = nodeID
-
-			// Only index by short name if there's no namespace conflict
-			if element.Namespace == "" {
-				// Global namespace - safe to index by short name
-				dt.nodeIndex[element.Name] = nodeID
-			} else {
-				// Check if this short name already exists
-				if _, exists := dt.nodeIndex[element.Name]; exists {
-					// There's a conflict - remove the short name index
-					// This forces resolution to use full namespaced names
-					delete(dt.nodeIndex, element.Name)
-
-					// Also remove it from the namespace map if it was a class
-					if element.Type == "class" {
-						delete(dt.namespaceMap, element.Name)
-					}
-				} else {
-					// No conflict yet - add a short name index
-					dt.nodeIndex[element.Name] = nodeID
-
-					if element.Type == "class" {
-						dt.namespaceMap[element.Name] = fullName
-					}
-				}
+			dt.addIndex(dt.nodeIndex, symbolKey(element.Namespace, element.ClassName, element.Name), nodeID)
+			dt.addIndex(dt.shortNameIndex, element.Name, nodeID)
+			dt.addIndex(dt.sourceIndex[file.Path], element.Name, nodeID)
+			if element.ClassName != "" {
+				dt.addIndex(dt.sourceIndex[file.Path], element.ClassName+"::"+element.Name, nodeID)
 			}
 		}
 	}
 
 	dt.graph.TotalNodes = len(dt.graph.Nodes)
+}
+
+func (dt *DependencyTracker) addIndex(index map[string][]string, key, nodeID string) {
+	for _, existingID := range index[key] {
+		if existingID == nodeID {
+			return
+		}
+	}
+	index[key] = append(index[key], nodeID)
+}
+
+func symbolKey(namespace, className, name string) string {
+	if className != "" {
+		name = className + "::" + name
+	}
+	if namespace != "" {
+		return namespace + "\\" + name
+	}
+	return name
 }
 
 // buildRelationships creates dependency links between nodes
@@ -134,7 +198,7 @@ func (dt *DependencyTracker) processImports(file *models.ParsedFile) {
 		// Find classes in current file that might use these imports
 		for _, element := range file.Elements {
 			if element.Type == "class" {
-				dt.createImportDependency(element, use, file)
+				dt.createImportDependency(element, use)
 			}
 		}
 	}
@@ -143,29 +207,26 @@ func (dt *DependencyTracker) processImports(file *models.ParsedFile) {
 // createDependency establishes a dependency relationship
 func (dt *DependencyTracker) createDependency(usage models.UsageElement, file *models.ParsedFile) {
 	if usage.Context == "" {
+		dt.recordResolutionDiagnostic(models.DiagnosticUnresolvedSource, file, usage, "", "Reference has no enclosing source context")
 		return
 	}
 
-	// Find the source node (where the usage occurs)
-	var sourceNode *models.DependencyNode
-	for _, node := range dt.graph.Nodes {
-		if node.File == file.Path {
-			if usage.Context == node.Name ||
-				(usage.Context == node.ClassName && node.Type == "class") {
-				sourceNode = node
-				break
-			}
-		}
-	}
-
+	sourceNode := dt.findSourceNode(file.Path, usage.Context)
 	if sourceNode == nil {
-		return // Can't find source context
+		dt.recordResolutionDiagnostic(models.DiagnosticUnresolvedSource, file, usage, usage.Context, "Source context could not be resolved uniquely")
+		return
 	}
 
-	// Find target node
-	targetNodeID := dt.findTargetNode(usage.Name, file.Namespace)
+	targetNodeID, ambiguous := dt.findTargetNode(usage.Name, usage.Type, file, sourceNode)
 	if targetNodeID == "" {
-		return // External dependency or not found
+		code := models.DiagnosticUnresolvedReference
+		message := "Reference could not be resolved to an internal symbol"
+		if ambiguous {
+			code = models.DiagnosticAmbiguousReference
+			message = "Reference matched multiple internal symbols"
+		}
+		dt.recordResolutionDiagnostic(code, file, usage, usage.Name, message)
+		return
 	}
 
 	targetNode := dt.graph.Nodes[targetNodeID]
@@ -173,32 +234,42 @@ func (dt *DependencyTracker) createDependency(usage models.UsageElement, file *m
 		return
 	}
 
-	// Create or update dependency reference
 	dt.addDependencyRef(sourceNode, targetNode, usage.Type, usage.Line)
 }
 
+func (dt *DependencyTracker) findSourceNode(filePath, context string) *models.DependencyNode {
+	candidates := dt.sourceIndex[filePath][context]
+	if len(candidates) > 1 {
+		var members []string
+		for _, nodeID := range candidates {
+			node := dt.graph.Nodes[nodeID]
+			if node != nil && node.ClassName == "" && node.Type != "class" && node.Type != "interface" && node.Type != "trait" && node.Type != "enum" {
+				members = append(members, nodeID)
+			}
+		}
+		if len(members) == 1 {
+			candidates = members
+		}
+	}
+	if len(candidates) != 1 {
+		return nil
+	}
+	return dt.graph.Nodes[candidates[0]]
+}
+
 // createImportDependency handles import-based dependencies
-func (dt *DependencyTracker) createImportDependency(element models.CodeElement, importPath string, file *models.ParsedFile) {
-	sourceNodeID := dt.nodeIndex[dt.getFullName(element.Namespace, element.Name)]
+func (dt *DependencyTracker) createImportDependency(element models.CodeElement, importPath string) {
+	sourceNodeID, _ := dt.uniqueNode([]string{symbolKey(element.Namespace, "", element.Name)}, "imports")
 	if sourceNodeID == "" {
 		return
 	}
 
-	sourceNode := dt.graph.Nodes[sourceNodeID]
-	if sourceNode == nil {
+	targetNodeID, _ := dt.uniqueNode([]string{importPath}, "imports")
+	if targetNodeID == "" {
 		return
 	}
 
-	// Only create dependencies for imports that actually exist in our codebase
-	// Try to find the exact import path first (full namespace match)
-	targetNodeID := dt.nodeIndex[importPath]
-	if targetNodeID != "" {
-		targetNode := dt.graph.Nodes[targetNodeID]
-		if targetNode != nil {
-			dt.addDependencyRef(sourceNode, targetNode, "imports", element.Line)
-		}
-		return
-	}
+	dt.addDependencyRef(dt.graph.Nodes[sourceNodeID], dt.graph.Nodes[targetNodeID], "imports", element.Line)
 }
 
 // addDependencyRef adds or updates a dependency reference
@@ -241,77 +312,157 @@ func (dt *DependencyTracker) addDependencyRef(source, target *models.DependencyN
 	dt.graph.TotalEdges++
 }
 
-// findTargetNode locates a target node by name and context
-func (dt *DependencyTracker) findTargetNode(name, namespace string) string {
-	// For method calls and property access like "pkg\\ClassName::memberName"
-	if strings.Contains(name, "::") {
-		parts := strings.Split(name, "::")
-		qualifiedClass := parts[0] // may be "pkg\\ClassName" (Go) or short "ClassName" (PHP)
-		memberName := parts[1]
-
-		// Extract the namespace embedded in the qualified class name (Go-style).
-		// e.g. "github.com/foo\\MyStruct" → memberNamespace = "github.com/foo"
-		memberNamespace := namespace
-		if idx := strings.LastIndex(qualifiedClass, "\\"); idx >= 0 {
-			memberNamespace = qualifiedClass[:idx]
+// findTargetNode locates an unambiguous target using qualified names, imports, and scope.
+func (dt *DependencyTracker) findTargetNode(name, usageType string, file *models.ParsedFile, sourceNode *models.DependencyNode) (string, bool) {
+	if qualifiedClass, memberName, ok := strings.Cut(name, "::"); ok {
+		if strings.HasPrefix(memberName, "$") {
+			usageType = "property"
 		}
-
-		// 1. Try the member node directly (method or property).
-		memberFullName := dt.getFullName(memberNamespace, memberName)
-		if nodeID, exists := dt.nodeIndex[memberFullName]; exists {
-			return nodeID
-		}
-
-		// 2. Try the member in the calling namespace (cross-package call recorded with
-		// a different namespace than the caller's own package).
-		if memberNamespace != namespace {
-			if nodeID, exists := dt.nodeIndex[dt.getFullName(namespace, memberName)]; exists {
-				return nodeID
+		memberName = strings.TrimPrefix(memberName, "$")
+		fullyQualified := strings.HasPrefix(qualifiedClass, "\\")
+		qualifiedClass = strings.TrimPrefix(qualifiedClass, "\\")
+		if qualifiedClass == "self" || qualifiedClass == "static" {
+			qualifiedClass = sourceNode.ClassName
+			if qualifiedClass == "" {
+				qualifiedClass = sourceNode.Name
 			}
 		}
 
-		// 3. Fall back to class-level lookup (PHP static calls like "Response::create").
-		fullName := dt.getFullName(namespace, qualifiedClass)
-		if nodeID, exists := dt.nodeIndex[fullName]; exists {
-			return nodeID
+		if fullyQualified {
+			return dt.uniqueNode([]string{symbolKey("", qualifiedClass, memberName)}, usageType)
 		}
+		if imported := resolveImport(file, qualifiedClass); imported != "" {
+			return dt.uniqueNode([]string{symbolKey("", imported, memberName)}, usageType)
+		}
+		if imported := resolveQualifiedImport(file, qualifiedClass); imported != "" {
+			return dt.uniqueNode([]string{symbolKey("", imported, memberName)}, usageType)
+		}
+		if strings.Contains(qualifiedClass, "\\") {
+			return dt.uniqueNode([]string{
+				symbolKey("", qualifiedClass, memberName),
+				symbolKey(file.Namespace, qualifiedClass, memberName),
+			}, usageType)
+		}
+		return dt.firstUniqueNode(usageType,
+			[]string{symbolKey(file.Namespace, qualifiedClass, memberName)},
+			[]string{symbolKey("", qualifiedClass, memberName)},
+		)
+	}
 
-		if fullName, exists := dt.namespaceMap[qualifiedClass]; exists {
-			if nodeID, exists := dt.nodeIndex[fullName]; exists {
-				return nodeID
+	fullyQualified := strings.HasPrefix(name, "\\")
+	name = strings.TrimPrefix(name, "\\")
+	if fullyQualified {
+		return dt.uniqueNode([]string{name}, usageType)
+	}
+	if imported := resolveImport(file, name); imported != "" {
+		return dt.uniqueNode([]string{imported}, usageType)
+	}
+	if imported := resolveQualifiedImport(file, name); imported != "" {
+		return dt.uniqueNode([]string{imported}, usageType)
+	}
+	if strings.Contains(name, "\\") {
+		if nodeID, ambiguous := dt.firstUniqueNode(usageType,
+			[]string{symbolKey(file.Namespace, "", name)},
+			[]string{name},
+		); nodeID != "" || ambiguous {
+			return nodeID, ambiguous
+		}
+	} else if nodeID, ambiguous := dt.firstUniqueNode(usageType,
+		[]string{symbolKey(file.Namespace, "", name)},
+		[]string{name},
+	); nodeID != "" || ambiguous {
+		return nodeID, ambiguous
+	}
+	return dt.uniqueCandidates(dt.shortNameIndex[name], usageType)
+}
+
+func (dt *DependencyTracker) firstUniqueNode(usageType string, keyGroups ...[]string) (string, bool) {
+	for _, keys := range keyGroups {
+		candidates := dt.matchingCandidates(keys, usageType)
+		if len(candidates) > 1 {
+			return "", true
+		}
+		if len(candidates) == 1 {
+			return candidates[0], false
+		}
+	}
+	return "", false
+}
+
+func (dt *DependencyTracker) uniqueNode(keys []string, usageType string) (string, bool) {
+	return dt.uniqueCandidates(dt.matchingCandidates(keys, usageType), usageType)
+}
+
+func (dt *DependencyTracker) matchingCandidates(keys []string, usageType string) []string {
+	var candidates []string
+	seen := make(map[string]bool)
+	for _, key := range keys {
+		for _, nodeID := range dt.nodeIndex[key] {
+			node := dt.graph.Nodes[nodeID]
+			if node != nil && matchesUsageType(node.Type, usageType) && !seen[nodeID] {
+				seen[nodeID] = true
+				candidates = append(candidates, nodeID)
 			}
 		}
+	}
+	return candidates
+}
 
-		if nodeID, exists := dt.nodeIndex[qualifiedClass]; exists {
-			if targetNode := dt.graph.Nodes[nodeID]; targetNode != nil {
-				if targetNode.Namespace != "" || targetNode.File != "" {
-					return nodeID
-				}
-			}
+func (dt *DependencyTracker) uniqueCandidates(candidates []string, usageType string) (string, bool) {
+	var match string
+	for _, nodeID := range candidates {
+		node := dt.graph.Nodes[nodeID]
+		if node == nil || !matchesUsageType(node.Type, usageType) {
+			continue
 		}
+		if match != "" {
+			return "", true
+		}
+		match = nodeID
+	}
+	return match, false
+}
 
+func matchesUsageType(nodeType, usageType string) bool {
+	switch usageType {
+	case "instantiation", "extends", "implements", "uses_trait", "class", "imports":
+		return nodeType == "class" || nodeType == "interface" || nodeType == "trait" || nodeType == "enum"
+	case "function_call", "function":
+		return nodeType == "function"
+	case "method_call":
+		return nodeType == "method" || nodeType == "property"
+	case "static_call":
+		return nodeType == "method" || nodeType == "constant"
+	case "property":
+		return nodeType == "property"
+	case "constant":
+		return nodeType == "constant"
+	default:
+		return true
+	}
+}
+
+func resolveImport(file *models.ParsedFile, name string) string {
+	if imported := file.ImportAliases[name]; imported != "" {
+		return imported
+	}
+	for _, importPath := range file.Uses {
+		parts := strings.Split(strings.Trim(importPath, "\\"), "\\")
+		if parts[len(parts)-1] == name {
+			return importPath
+		}
+	}
+	return ""
+}
+
+func resolveQualifiedImport(file *models.ParsedFile, name string) string {
+	qualifier, remainder, ok := strings.Cut(name, "\\")
+	if !ok {
 		return ""
 	}
-
-	// For regular method calls, property access, etc.
-	// Try the exact match first
-	if nodeID, exists := dt.nodeIndex[name]; exists {
-		return nodeID
+	if imported := resolveImport(file, qualifier); imported != "" {
+		return strings.TrimSuffix(imported, "\\") + "\\" + remainder
 	}
-
-	// Try with the current namespace
-	fullName := dt.getFullName(namespace, name)
-	if nodeID, exists := dt.nodeIndex[fullName]; exists {
-		return nodeID
-	}
-
-	// Try to resolve through the namespace map
-	if fullName, exists := dt.namespaceMap[name]; exists {
-		if nodeID, exists := dt.nodeIndex[fullName]; exists {
-			return nodeID
-		}
-	}
-
 	return ""
 }
 
@@ -371,7 +522,10 @@ func (dt *DependencyTracker) identifyPatterns() {
 
 	// Sort by different criteria
 	sort.Slice(allNodes, func(i, j int) bool {
-		return len(allNodes[i].Dependents) > len(allNodes[j].Dependents)
+		if len(allNodes[i].Dependents) != len(allNodes[j].Dependents) {
+			return len(allNodes[i].Dependents) > len(allNodes[j].Dependents)
+		}
+		return allNodes[i].ID < allNodes[j].ID
 	})
 
 	// Top 10 most depended upon
@@ -390,7 +544,10 @@ func (dt *DependencyTracker) identifyPatterns() {
 
 	// Sort by complexity score for complex nodes
 	sort.Slice(allNodes, func(i, j int) bool {
-		return allNodes[i].Score > allNodes[j].Score
+		if allNodes[i].Score != allNodes[j].Score {
+			return allNodes[i].Score > allNodes[j].Score
+		}
+		return allNodes[i].ID < allNodes[j].ID
 	})
 
 	maxComplexNodes := 10
@@ -398,14 +555,6 @@ func (dt *DependencyTracker) identifyPatterns() {
 		maxComplexNodes = len(allNodes)
 	}
 	dt.graph.ComplexNodes = allNodes[:maxComplexNodes]
-}
-
-// Helper functions
-func (dt *DependencyTracker) getFullName(namespace, name string) string {
-	if namespace == "" {
-		return name
-	}
-	return namespace + "\\" + name
 }
 
 // PrintSummary displays a human-readable summary of the dependency graph
@@ -676,4 +825,3 @@ func (dt *DependencyTracker) PrintFunctionUsageReport() {
 
 	fmt.Println(strings.Repeat("=", 70))
 }
-

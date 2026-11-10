@@ -74,6 +74,32 @@ abstract class User {
 	}
 }
 
+func TestPHPParser_QualifiesThisReferences(t *testing.T) {
+	tmp := t.TempDir()
+	code := `<?php
+class Wallet {
+    private $balance;
+    public function save() {
+        $this->balance = 10;
+        $this->persist();
+    }
+}
+`
+	path := writePHP(t, tmp, "Wallet.php", code)
+
+	parsed, err := NewPHPParser().ParseFile(path)
+	if err != nil {
+		t.Fatalf("ParseFile error: %v", err)
+	}
+	found := make(map[string]bool)
+	for _, usage := range parsed.Usage {
+		found[usage.Name] = true
+	}
+	if !found["Wallet::balance"] || !found["Wallet::persist"] {
+		t.Fatalf("expected $this references to include class scope, got %+v", parsed.Usage)
+	}
+}
+
 func TestPHPParser_FunctionAndUsage(t *testing.T) {
 	tmp := t.TempDir()
 	code := `<?php
@@ -114,6 +140,31 @@ format_phone("123");
 	if !(fn && usageNew && usageMethod && usageFunc) {
 		t.Errorf("expected fn=%v new=%v method=%v func=%v",
 			fn, usageNew, usageMethod, usageFunc)
+	}
+}
+
+func TestPHPParser_ImportAliases(t *testing.T) {
+	tmp := t.TempDir()
+	code := `<?php
+namespace App\Http;
+use Vendor\Billing\Invoice as BillableInvoice;
+use App\Services\{Mailer, PaymentService as Pay};
+`
+	path := writePHP(t, tmp, "Controller.php", code)
+
+	parsed, err := NewPHPParser().ParseFile(path)
+	if err != nil {
+		t.Fatalf("ParseFile error: %v", err)
+	}
+	aliases := map[string]string{
+		"BillableInvoice": "Vendor\\Billing\\Invoice",
+		"Mailer":          "App\\Services\\Mailer",
+		"Pay":             "App\\Services\\PaymentService",
+	}
+	for alias, expected := range aliases {
+		if got := parsed.ImportAliases[alias]; got != expected {
+			t.Errorf("alias %s: got %q, want %q", alias, got, expected)
+		}
 	}
 }
 
@@ -205,6 +256,90 @@ enum Status: string implements BackedEnum {
 	if !foundFinalClass || !foundEnum || !foundTrait || !foundUsesTrait || !extendsUsage || !implementsUsage || !enumImplements || !traitUseEdge {
 		t.Errorf("expected final class, enum, trait and use with relationships, got class=%v enum=%v trait=%v usesTrait=%v extends=%v implements=%v enumImplements=%v traitUse=%v",
 			foundFinalClass, foundEnum, foundTrait, foundUsesTrait, extendsUsage, implementsUsage, enumImplements, traitUseEdge)
+	}
+}
+
+func TestPHPParser_MultilineAndEmptyScopes(t *testing.T) {
+	tmp := t.TempDir()
+	code := `<?php
+namespace App\Domain;
+
+interface Contract
+{
+    public function validate(); // bodiless declaration
+}
+
+trait Loggable
+{
+}
+
+class User
+{
+    public function validate()
+    {
+        self::validate();
+    }
+
+    use Loggable;
+}
+
+class EmptyClass {}
+
+class DeferredEmpty
+{}
+
+class AfterDeferredEmpty {}
+
+function deferredEmpty()
+{}
+
+function globalHelper()
+{
+    validate_global();
+}
+`
+	path := writePHP(t, tmp, "Multiline.php", code)
+
+	parsed, err := NewPHPParser().ParseFile(path)
+	if err != nil {
+		t.Fatalf("ParseFile error: %v", err)
+	}
+
+	elements := make(map[string]bool)
+	for _, element := range parsed.Elements {
+		key := element.Type + ":" + element.ClassName + ":" + element.Name
+		elements[key] = true
+	}
+	for _, expected := range []string{
+		"interface::Contract",
+		"method:Contract:validate",
+		"trait::Loggable",
+		"class::User",
+		"method:User:validate",
+		"class::EmptyClass",
+		"class::DeferredEmpty",
+		"class::AfterDeferredEmpty",
+		"function::deferredEmpty",
+		"function::globalHelper",
+	} {
+		if !elements[expected] {
+			t.Errorf("missing element %s in %+v", expected, parsed.Elements)
+		}
+	}
+
+	var recursiveCall, traitUse, globalCall bool
+	for _, usage := range parsed.Usage {
+		switch {
+		case usage.Type == "static_call" && usage.Name == "self::validate":
+			recursiveCall = usage.Context == "User::validate"
+		case usage.Type == "uses_trait" && usage.Name == "Loggable":
+			traitUse = usage.Context == "User"
+		case usage.Type == "function_call" && usage.Name == "validate_global":
+			globalCall = usage.Context == "globalHelper"
+		}
+	}
+	if !recursiveCall || !traitUse || !globalCall {
+		t.Fatalf("incorrect usage contexts: recursive=%t trait=%t global=%t; usage=%+v", recursiveCall, traitUse, globalCall, parsed.Usage)
 	}
 }
 
