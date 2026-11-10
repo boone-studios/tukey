@@ -237,6 +237,7 @@ func (dt *DependencyTracker) createDependency(usage models.UsageElement, file *m
 	dt.addDependencyRef(sourceNode, targetNode, usage.Type, usage.Line)
 }
 
+// findSourceNode resolves an enclosing context to a unique node in the same file.
 func (dt *DependencyTracker) findSourceNode(filePath, context string) *models.DependencyNode {
 	candidates := dt.sourceIndex[filePath][context]
 	if len(candidates) > 1 {
@@ -423,6 +424,7 @@ func (dt *DependencyTracker) uniqueCandidates(candidates []string, usageType str
 	return match, false
 }
 
+// matchesUsageType reports whether a candidate node can satisfy a reference kind.
 func matchesUsageType(nodeType, usageType string) bool {
 	switch usageType {
 	case "instantiation", "extends", "implements", "uses_trait", "imports":

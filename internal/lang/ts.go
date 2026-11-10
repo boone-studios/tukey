@@ -67,6 +67,8 @@ func NewTSParser() *TSParser {
 	}
 }
 
+var tsIdentifierOnly = regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]*$`)
+
 type tsScope struct {
 	name    string
 	kind    string
@@ -102,6 +104,9 @@ func (p *TSParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 	var container *tsScope
 	var function *tsScope
 	inMultiLineComment := false
+	inImportStatement := false
+	var importStatement strings.Builder
+	isTSX := strings.EqualFold(filepath.Ext(filePath), ".tsx")
 
 	for scanner.Scan() {
 		lineNum++
@@ -125,6 +130,24 @@ func (p *TSParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 			}
 		}
 		if strings.HasPrefix(trimmedLine, "//") || trimmedLine == "" {
+			continue
+		}
+
+		if inImportStatement {
+			importStatement.WriteByte(' ')
+			importStatement.WriteString(trimmedLine)
+			statement := importStatement.String()
+			if p.importPattern.MatchString(statement) || p.exportFromPattern.MatchString(statement) {
+				p.parseImports(statement, filePath, parsed)
+				importStatement.Reset()
+				inImportStatement = false
+			}
+			continue
+		}
+		if container == nil && isTSImportStatementStart(trimmedLine) &&
+			!p.importPattern.MatchString(trimmedLine) && !p.exportFromPattern.MatchString(trimmedLine) {
+			importStatement.WriteString(trimmedLine)
+			inImportStatement = true
 			continue
 		}
 
@@ -249,10 +272,13 @@ func (p *TSParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 				})
 				declaredName = matches[2]
 				declaration = true
+				if hasOpeningBrace && braceDepth > depthBefore {
+					function = &tsScope{name: matches[2], depth: depthBefore + 1}
+				}
 			}
 		}
 
-		if !declaration && container == nil {
+		if !declaration && container == nil && function == nil {
 			if matches := p.functionPattern.FindStringSubmatch(line); matches != nil {
 				parsed.Elements = append(parsed.Elements, models.CodeElement{
 					Type:       "function",
@@ -311,7 +337,7 @@ func (p *TSParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 				context = className + "::" + function.name
 			}
 		}
-		p.parseUsage(cleanLine, lineNum, context, declaredName, parsed)
+		p.parseUsage(cleanLine, lineNum, context, declaredName, isTSX, parsed)
 
 		if temporaryFunction {
 			function = nil
@@ -328,6 +354,20 @@ func (p *TSParser) ParseFile(filePath string) (*models.ParsedFile, error) {
 	return parsed, scanner.Err()
 }
 
+// isTSImportStatementStart reports whether a line can begin a static import or re-export.
+func isTSImportStatementStart(line string) bool {
+	if strings.HasPrefix(line, "import ") || strings.HasPrefix(line, "import\t") {
+		return true
+	}
+	if !strings.HasPrefix(line, "export ") {
+		return false
+	}
+	remainder := strings.TrimSpace(strings.TrimPrefix(line, "export "))
+	remainder = strings.TrimSpace(strings.TrimPrefix(remainder, "type "))
+	return strings.HasPrefix(remainder, "{") || strings.HasPrefix(remainder, "*")
+}
+
+// parseImports records module specifiers and aliases from a complete statement.
 func (p *TSParser) parseImports(line, filePath string, parsed *models.ParsedFile) {
 	if matches := p.importPattern.FindStringSubmatch(line); matches != nil {
 		parsed.Uses = append(parsed.Uses, matches[2])
@@ -346,6 +386,7 @@ func (p *TSParser) parseImports(line, filePath string, parsed *models.ParsedFile
 	}
 }
 
+// tsImportNamespace maps a relative module specifier to its source directory.
 func tsImportNamespace(filePath, importPath string) string {
 	resolvedPath := filepath.Clean(filepath.Join(filepath.Dir(filePath), filepath.FromSlash(importPath)))
 	if info, err := os.Stat(resolvedPath); err == nil && info.IsDir() {
@@ -362,6 +403,7 @@ func tsImportNamespace(filePath, importPath string) string {
 	return filepath.Dir(resolvedPath)
 }
 
+// recordImportAliases maps local import names to their qualified source symbols.
 func (p *TSParser) recordImportAliases(clause, importPath, filePath string, parsed *models.ParsedFile) {
 	clause = strings.TrimSpace(clause)
 	if clause == "" || !strings.HasPrefix(importPath, ".") {
@@ -406,7 +448,30 @@ func (p *TSParser) recordImportAliases(clause, importPath, filePath string, pars
 	}
 }
 
+// stripTSTypeParameters removes a leading balanced generic parameter list.
+func stripTSTypeParameters(heritage string) string {
+	trimmed := strings.TrimLeft(heritage, " \t")
+	if !strings.HasPrefix(trimmed, "<") {
+		return heritage
+	}
+	depth := 0
+	for index, char := range trimmed {
+		switch char {
+		case '<':
+			depth++
+		case '>':
+			depth--
+			if depth == 0 {
+				return trimmed[index+1:]
+			}
+		}
+	}
+	return heritage
+}
+
+// parseHeritage records class base types and implemented interfaces.
 func (p *TSParser) parseHeritage(heritage, context string, lineNum int, parsed *models.ParsedFile) {
+	heritage = stripTSTypeParameters(heritage)
 	if matches := p.extendsPattern.FindStringSubmatch(heritage); matches != nil {
 		parsed.Usage = append(parsed.Usage, models.UsageElement{
 			Type:    "extends",
@@ -433,7 +498,9 @@ func (p *TSParser) parseHeritage(heritage, context string, lineNum int, parsed *
 	}
 }
 
+// parseInterfaceHeritage records every interface in an extends list.
 func (p *TSParser) parseInterfaceHeritage(heritage, context string, lineNum int, parsed *models.ParsedFile) {
+	heritage = stripTSTypeParameters(heritage)
 	if matches := p.extendsPattern.FindStringSubmatch(heritage); matches != nil {
 		start := strings.Index(heritage, matches[1])
 		if start == -1 {
@@ -456,7 +523,8 @@ func (p *TSParser) parseInterfaceHeritage(heritage, context string, lineNum int,
 	}
 }
 
-func (p *TSParser) parseUsage(line string, lineNum int, context, declaredName string, parsed *models.ParsedFile) {
+// parseUsage records calls, instantiations, and actual JSX component tags.
+func (p *TSParser) parseUsage(line string, lineNum int, context, declaredName string, isTSX bool, parsed *models.ParsedFile) {
 	for _, match := range p.newInstancePattern.FindAllStringSubmatch(line, -1) {
 		parsed.Usage = append(parsed.Usage, models.UsageElement{
 			Type:    "instantiation",
@@ -495,16 +563,28 @@ func (p *TSParser) parseUsage(line string, lineNum int, context, declaredName st
 		})
 	}
 
-	for _, match := range p.jsxPattern.FindAllStringSubmatch(line, -1) {
+	if !isTSX {
+		return
+	}
+	for _, index := range p.jsxPattern.FindAllStringSubmatchIndex(line, -1) {
+		if index[0] > 0 {
+			previous := line[index[0]-1]
+			if previous == ')' || previous == ']' || previous == '_' || previous == '$' ||
+				(previous >= 'A' && previous <= 'Z') || (previous >= 'a' && previous <= 'z') ||
+				(previous >= '0' && previous <= '9') {
+				continue
+			}
+		}
 		parsed.Usage = append(parsed.Usage, models.UsageElement{
 			Type:    "jsx",
-			Name:    normalizeTSQualifiedName(match[1]),
+			Name:    normalizeTSQualifiedName(line[index[2]:index[3]]),
 			Context: context,
 			Line:    lineNum,
 		})
 	}
 }
 
+// parseTSParameters extracts parameter names while ignoring type annotations and defaults.
 func parseTSParameters(parameters string) []string {
 	var result []string
 	for _, parameter := range splitTopLevelTS(parameters, ',') {
@@ -526,7 +606,7 @@ func parseTSParameters(parameters string) []string {
 		if parameter == "" {
 			continue
 		}
-		if !regexp.MustCompile(`^[A-Za-z_$][A-Za-z0-9_$]*$`).MatchString(parameter) {
+		if !tsIdentifierOnly.MatchString(parameter) {
 			parameter = "_"
 		}
 		result = append(result, parameter)
@@ -534,6 +614,7 @@ func parseTSParameters(parameters string) []string {
 	return result
 }
 
+// splitTopLevelTS splits on separators outside nested generic or expression groups.
 func splitTopLevelTS(value string, separator rune) []string {
 	var result []string
 	start := 0
@@ -575,6 +656,7 @@ func splitTopLevelTS(value string, separator rune) []string {
 	return result
 }
 
+// tsVisibility returns the explicit member visibility or TypeScript's public default.
 func tsVisibility(modifiers string) string {
 	for _, visibility := range []string{"public", "private", "protected"} {
 		if hasTSModifier(modifiers, visibility) {
@@ -584,6 +666,7 @@ func tsVisibility(modifiers string) string {
 	return "public"
 }
 
+// hasTSModifier reports whether a whitespace-delimited modifier list contains modifier.
 func hasTSModifier(modifiers, modifier string) bool {
 	for _, field := range strings.Fields(modifiers) {
 		if field == modifier {
@@ -593,6 +676,7 @@ func hasTSModifier(modifiers, modifier string) bool {
 	return false
 }
 
+// tsControlKeyword filters language constructs that resemble function calls.
 func tsControlKeyword(name string) bool {
 	switch name {
 	case "if", "for", "while", "switch", "catch", "with", "return", "throw", "new", "typeof", "instanceof", "await", "super":
@@ -602,6 +686,7 @@ func tsControlKeyword(name string) bool {
 	}
 }
 
+// normalizeTSQualifiedName converts dotted TypeScript qualifiers to graph qualifiers.
 func normalizeTSQualifiedName(name string) string {
 	return strings.ReplaceAll(strings.TrimSpace(name), ".", `\`)
 }

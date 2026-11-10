@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/boone-studios/tukey/internal/analyzer"
@@ -281,5 +282,182 @@ export function Card() {
 	cardID := models.StableSymbolID("function", tmp, "", "Card")
 	if graph.Nodes[cardID] == nil || graph.Nodes[cardID].Dependencies[serviceID] == nil {
 		t.Errorf("Card should depend on Service through JSX; card: %+v, parsed: %+v, diagnostics: %+v", graph.Nodes[cardID], parsedFiles[2], graph.Diagnostics)
+	}
+}
+
+func TestTSParser_MultilineImportsAndReexports(t *testing.T) {
+	tmp := t.TempDir()
+	code := `import {
+    Logger as AppLogger,
+    type User,
+} from './models';
+
+export {
+    User as PublicUser,
+} from './models';
+
+export const logger = new AppLogger();
+`
+	path := writeTS(t, tmp, "multiline.ts", code)
+	parsed, err := NewTSParser().ParseFile(path)
+	if err != nil {
+		t.Fatalf("ParseFile error: %v", err)
+	}
+
+	if !reflect.DeepEqual(parsed.Uses, []string{"./models", "./models"}) {
+		t.Errorf("unexpected multiline imports: %+v", parsed.Uses)
+	}
+	if got := parsed.ImportAliases["AppLogger"]; got != tmp+`\Logger` {
+		t.Errorf("AppLogger alias = %q", got)
+	}
+	if got := parsed.ImportAliases["User"]; got != tmp+`\User` {
+		t.Errorf("User alias = %q", got)
+	}
+}
+
+func TestTSParser_ConstrainedGenericHeritage(t *testing.T) {
+	tmp := t.TempDir()
+	code := `export interface Repository<T extends Entity> extends BaseRepository<T> {}
+export class Store<T extends Entity> extends BaseStore<T> implements Repository<T> {}
+`
+	path := writeTS(t, tmp, "generics.ts", code)
+	parsed, err := NewTSParser().ParseFile(path)
+	if err != nil {
+		t.Fatalf("ParseFile error: %v", err)
+	}
+
+	for _, expected := range []struct {
+		name    string
+		context string
+	}{
+		{"BaseRepository", "Repository"},
+		{"BaseStore", "Store"},
+	} {
+		if !findTSUsage(parsed.Usage, "extends", expected.name, expected.context) {
+			t.Errorf("missing extends usage %+v: %+v", expected, parsed.Usage)
+		}
+	}
+	for _, usage := range parsed.Usage {
+		if usage.Type == "extends" && (usage.Name == "Entity" || strings.Contains(usage.Name, "extends")) {
+			t.Errorf("generic constraint recorded as heritage: %+v", usage)
+		}
+	}
+}
+
+func TestTSParser_NestedDeclarationsStayOutOfTopLevelSymbols(t *testing.T) {
+	tmp := t.TempDir()
+	code := `export function outer(): void {
+    const value = 1;
+    function inner(): void {
+        helper();
+    }
+    helper();
+}
+export const topLevel = 1;
+`
+	path := writeTS(t, tmp, "nested.ts", code)
+	parsed, err := NewTSParser().ParseFile(path)
+	if err != nil {
+		t.Fatalf("ParseFile error: %v", err)
+	}
+
+	for _, unexpected := range []struct {
+		elementType string
+		name        string
+	}{
+		{"constant", "value"},
+		{"function", "inner"},
+	} {
+		if findTSElement(parsed.Elements, unexpected.elementType, unexpected.name) != nil {
+			t.Errorf("nested declaration became top-level: %+v", unexpected)
+		}
+	}
+	if findTSElement(parsed.Elements, "function", "outer") == nil || findTSElement(parsed.Elements, "constant", "topLevel") == nil {
+		t.Errorf("missing top-level declarations: %+v", parsed.Elements)
+	}
+	helperCalls := 0
+	for _, usage := range parsed.Usage {
+		if usage.Type == "function_call" && usage.Name == "helper" && usage.Context == "outer" {
+			helperCalls++
+		}
+	}
+	if helperCalls != 2 {
+		t.Errorf("expected both helper calls in outer context, got %d: %+v", helperCalls, parsed.Usage)
+	}
+}
+
+func TestTSParser_ClassFieldBodiesDoNotBecomeMembers(t *testing.T) {
+	tmp := t.TempDir()
+	code := `export class Widget {
+    handler = () => {
+        doWork();
+    };
+    private config = {
+        retries: 3,
+    };
+    run(): void {
+        helper();
+    }
+}
+`
+	path := writeTS(t, tmp, "Widget.ts", code)
+	parsed, err := NewTSParser().ParseFile(path)
+	if err != nil {
+		t.Fatalf("ParseFile error: %v", err)
+	}
+
+	if findTSElement(parsed.Elements, "property", "handler") == nil || findTSElement(parsed.Elements, "property", "config") == nil {
+		t.Errorf("missing class fields: %+v", parsed.Elements)
+	}
+	for _, unexpected := range []struct {
+		elementType string
+		name        string
+	}{
+		{"method", "doWork"},
+		{"property", "retries"},
+	} {
+		if findTSElement(parsed.Elements, unexpected.elementType, unexpected.name) != nil {
+			t.Errorf("field body produced spurious member: %+v", unexpected)
+		}
+	}
+	if !findTSUsage(parsed.Usage, "function_call", "doWork", "Widget::handler") {
+		t.Errorf("field body usage has wrong context: %+v", parsed.Usage)
+	}
+	if !findTSUsage(parsed.Usage, "function_call", "helper", "Widget::run") {
+		t.Errorf("method usage has wrong context: %+v", parsed.Usage)
+	}
+}
+
+func TestTSParser_JSXDetectionSkipsGenerics(t *testing.T) {
+	tmp := t.TempDir()
+	tsPath := writeTS(t, tmp, "types.ts", `export function identity<T>(value: T): Promise<User> {
+    return Promise.resolve(value);
+}
+`)
+	parsed, err := NewTSParser().ParseFile(tsPath)
+	if err != nil {
+		t.Fatalf("ParseFile error: %v", err)
+	}
+	for _, usage := range parsed.Usage {
+		if usage.Type == "jsx" {
+			t.Errorf("TypeScript generic produced JSX usage: %+v", usage)
+		}
+	}
+
+	tsxPath := writeTS(t, tmp, "component.tsx", `const value = factory<User>();
+const element = <UserCard />;
+const nested = <Layout><UserCard /></Layout>;
+`)
+	parsed, err = NewTSParser().ParseFile(tsxPath)
+	if err != nil {
+		t.Fatalf("ParseFile error: %v", err)
+	}
+	for _, usage := range parsed.Usage {
+		if usage.Type == "jsx" && usage.Name == "User" {
+			t.Errorf("TSX generic produced JSX usage: %+v", usage)
+		}
+	}
+	if !findTSUsage(parsed.Usage, "jsx", "UserCard", "") || !findTSUsage(parsed.Usage, "jsx", "Layout", "") {
+		t.Errorf("missing real JSX tags: %+v", parsed.Usage)
 	}
 }
